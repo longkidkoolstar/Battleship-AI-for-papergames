@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Battleship AI for Papergames
 // @namespace    github.io/longkidkoolstar
-// @version      1.0
+// @version      1.0.1
 // @description  An enhanced AI for playing Battleship on papergames.io with strategic moves and console logging
 // @author       longkidkoolstar
 // @match        https://papergames.io/*
@@ -19,6 +19,8 @@
     let potentialTargets = [];
     let shipOrientation = null; // 'vertical', 'horizontal', or null
     let confirmedHits = []; // Store coordinates of confirmed hits
+    let activeTargets = []; // Queue for high-priority cells to guess
+    let orientation = null; // Track current ship orientation ('horizontal' or 'vertical')
 
     // Function to analyze the current board state
     function analyzeBoardState() {
@@ -51,7 +53,7 @@
         
         return board;
     }
-
+    
     // Helper function to get all unhit cells with improved board analysis
     function getAvailableCells() {
         const cells = [];
@@ -186,22 +188,36 @@
             };
             confirmedHits.push(hitCoord);
             
-            // Determine orientation if we have multiple hits
-            if (confirmedHits.length >= 2) {
-                shipOrientation = determineOrientation();
+            // Determine direction if we have multiple hits
+            if (confirmedHits.length === 2) {
+                const firstHit = confirmedHits[0];
+                const secondHit = confirmedHits[1];
+                if (firstHit.row === secondHit.row) {
+                    shipOrientation = 'horizontal';
+                } else if (firstHit.col === secondHit.col) {
+                    shipOrientation = 'vertical';
+                }
             }
             
             huntMode = false;
             lastHit = cell;
             
-            // Add adjacent cells as potential targets if they're valid
+            // Prioritize targets in the determined direction
             let adjacentCells = getAdjacentCells(cell);
-            if (shipOrientation) {
-                // If orientation is determined, prioritize cells in that direction
+            if (shipOrientation === 'horizontal') {
                 potentialTargets = potentialTargets.concat(
                     adjacentCells.filter(adjCell => 
                         !isHitWithSkull(adjCell) && 
-                        !adjCell.querySelector('.miss')
+                        !adjCell.querySelector('.miss') &&
+                        parseInt(adjCell.getAttribute('data-row')) === hitCoord.row
+                    )
+                );
+            } else if (shipOrientation === 'vertical') {
+                potentialTargets = potentialTargets.concat(
+                    adjacentCells.filter(adjCell => 
+                        !isHitWithSkull(adjCell) && 
+                        !adjCell.querySelector('.miss') &&
+                        parseInt(adjCell.getAttribute('data-col')) === hitCoord.col
                     )
                 );
             } else {
@@ -312,18 +328,20 @@ function updateBoard() {
         // Check for error message first
         checkForErrorAndRefresh();
         
-        // Always prioritize targeting around confirmed hits
+        // Check for confirmed hits first and handle all possible follow-ups
         if (confirmedHits.length > 0) {
-            console.log("Following up on confirmed hits...");
+            console.log("Following up on confirmed hits");
             if (potentialTargets.length > 0) {
-                const nextTarget = potentialTargets[potentialTargets.length - 1];
-                console.log("Targeting adjacent to hit:", nextTarget);
+                const nextTarget = potentialTargets.pop();
+                console.log("Attacking potential target around hit");
                 attackCell(nextTarget);
                 return;
-            } else {
-                // If we have hits but no potential targets, regenerate adjacent cells
-                const lastHitCell = confirmedHits[confirmedHits.length - 1];
-                const cell = document.querySelector(`[data-row="${lastHitCell.row}"][data-col="${lastHitCell.col}"]`);
+            }
+
+            // Try to generate new targets around ALL confirmed hits if no current targets
+            for (let i = confirmedHits.length - 1; i >= 0; i--) {
+                const hitCell = confirmedHits[i];
+                const cell = document.querySelector(`[data-row="${hitCell.row}"][data-col="${hitCell.col}"]`);
                 if (cell) {
                     const newTargets = getAdjacentCells(cell).filter(adjCell => 
                         !isHitWithSkull(adjCell) && 
@@ -339,7 +357,7 @@ function updateBoard() {
             }
         }
         
-        // Prioritize question marks if there are no confirmed hits
+        // Only check question marks if we have exhausted all hit-related moves
         const questionMarkCells = Array.from(document.querySelectorAll('td')).filter(cell => hasQuestionMark(cell));
         if (questionMarkCells.length > 0) {
             console.log("No hits to follow up, targeting question mark");
@@ -348,7 +366,7 @@ function updateBoard() {
         }
 
         // Fall back to hunt mode if no other options
-        console.log("No hits or question marks, performing regular hunt mode attack...");
+        console.log("No hits or question marks, performing regular hunt mode attack");
         performAttack(currentElement.textContent);
     });
 }
@@ -404,68 +422,131 @@ function targetModeAttack() {
     }
 }
 
-// Modified handleAttackResult to ensure proper mode tracking
-function handleAttackResult(cell) {
-    if (isHitWithSkull(cell)) {
-        const hitCoord = {
-            row: parseInt(cell.getAttribute('data-row')),
-            col: parseInt(cell.getAttribute('data-col'))
-        };
-        confirmedHits.push(hitCoord);
-        
-        // Determine orientation if we have multiple hits
-        if (confirmedHits.length >= 2) {
-            shipOrientation = determineOrientation();
+// Function to add active targets
+function addActiveTargets(hitCell) {
+    const [x, y] = hitCell;
+    const potentialTargets = [
+        [x - 1, y], // Up
+        [x + 1, y], // Down
+        [x, y - 1], // Left
+        [x, y + 1]  // Right
+    ];
+    for (const [px, py] of potentialTargets) {
+        if (isValidGuess(px, py) && !isAlreadyTargeted(px, py)) {
+            activeTargets.push([px, py]);
         }
-        
-        huntMode = false;
-        lastHit = cell;
-        
-        // Get adjacent cells for targeting
-        let adjacent = getAdjacentCells(cell);
-        potentialTargets.push(...adjacent.filter(adjCell => 
-            !isHitWithSkull(adjCell) && 
-            !adjCell.querySelector('.miss')
-        ));
-        
-        console.log('Added adjacent cells as potential targets:', potentialTargets);
-    } else if (cell.querySelector('.miss')) {
-        console.log('Miss on cell:', cell);
     }
 }
 
-// Modified getAdjacentCells to strictly follow determined orientation
-function getAdjacentCells(cell) {
-    const row = parseInt(cell.getAttribute('data-row'));
-    const col = parseInt(cell.getAttribute('data-col'));
-    let adjacentCells = [];
-    
-    if (shipOrientation === 'vertical') {
-        // Only add cells above and below
-        adjacentCells.push(
-            document.querySelector(`[data-row="${row-1}"][data-col="${col}"]`),
-            document.querySelector(`[data-row="${row+1}"][data-col="${col}"]`)
-        );
-    } else if (shipOrientation === 'horizontal') {
-        // Only add cells left and right
-        adjacentCells.push(
-            document.querySelector(`[data-row="${row}"][data-col="${col-1}"]`),
-            document.querySelector(`[data-row="${row}"][data-col="${col+1}"]`)
-        );
-    } else {
-        // No orientation determined yet, check all directions
-        adjacentCells.push(
-            document.querySelector(`[data-row="${row-1}"][data-col="${col}"]`),
-            document.querySelector(`[data-row="${row+1}"][data-col="${col}"]`),
-            document.querySelector(`[data-row="${row}"][data-col="${col-1}"]`),
-            document.querySelector(`[data-row="${row}"][data-col="${col+1}"]`)
-        );
+// Function to check if a guess is valid
+function isValidGuess(x, y) {
+    // Check if the cell is within bounds and hasn't been guessed already
+    const board = analyzeBoardState();
+    return x >= 0 && x < 10 && y >= 0 && y < 10 && board[x][y] === 'available';
+}
+
+// Function to check if a cell is already targeted
+function isAlreadyTargeted(x, y) {
+    // Check if the cell is already in the active targets queue
+    return activeTargets.some(([tx, ty]) => tx === x && ty === y);
+}
+
+// Function to get the next guess
+function getNextGuess() {
+    if (activeTargets.length > 0) {
+        // Prioritize finishing a ship
+        return activeTargets.shift();
     }
-    
-    // Filter out null cells and already attacked cells
-    return adjacentCells.filter(cell => 
-        cell && !cell.hasAttribute('data-result')
-    );
+    // Otherwise, fall back to probability-based hunt mode
+    return getNextHuntGuess();
+}
+
+// Function to get the next hunt guess
+function getNextHuntGuess() {
+    const cells = getAvailableCells();
+    if (cells.length > 0) {
+        return cells[0];
+    }
+    return null;
+}
+
+// Function to update orientation
+function updateOrientation(hitCell) {
+    const [x, y] = hitCell;
+
+    // Check neighbors to determine orientation
+    const neighbors = [
+        [x - 1, y], [x + 1, y], // Vertical neighbors
+        [x, y - 1], [x, y + 1]  // Horizontal neighbors
+    ];
+
+    for (const [nx, ny] of neighbors) {
+        if (isValidHit(nx, ny)) {
+            if (nx === x) {
+                orientation = 'horizontal';
+            } else if (ny === y) {
+                orientation = 'vertical';
+            }
+            return;
+        }
+    }
+}
+
+// Function to check if a hit is valid
+function isValidHit(x, y) {
+    // Check if the cell is a valid hit
+    const board = analyzeBoardState();
+    return x >= 0 && x < 10 && y >= 0 && y < 10 && board[x][y] === 'hit';
+}
+
+// Function to get the next guess from orientation
+function getNextGuessFromOrientation(lastHit) {
+    const [x, y] = lastHit;
+
+    if (orientation === 'horizontal') {
+        return [[x, y - 1], [x, y + 1]].find(([nx, ny]) => isValidGuess(nx, ny));
+    } else if (orientation === 'vertical') {
+        return [[x - 1, y], [x + 1, y]].find(([nx, ny]) => isValidGuess(nx, ny));
+    }
+
+    // If no orientation yet, guess around
+    return activeTargets.shift();
+}
+
+// Function to get the next target guess
+function getNextTargetGuess() {
+    if (orientation) {
+        // Follow locked orientation
+        const target = getNextGuessFromOrientation(activeTargets[0]);
+        if (target) return target;
+    }
+
+    // Default to first in active targets if no orientation is determined
+    return activeTargets.shift();
+}
+
+// Function to play a turn
+function playTurn() {
+    const nextGuess = getNextGuess();
+
+    // Perform the guess
+    const [x, y] = nextGuess;
+    const result = makeGuess(x, y); // Function to guess and receive feedback (hit/miss/destroyed)
+
+    if (result === 'hit') {
+        const board = analyzeBoardState();
+        board[x][y] = 'hit';
+        addActiveTargets([x, y]);
+        updateOrientation([x, y]);
+    } else if (result === 'destroyed') {
+        const board = analyzeBoardState();
+        board[x][y] = 'destroyed';
+        orientation = null; // Reset orientation after ship is sunk
+        activeTargets = []; // Clear active targets
+    } else {
+        const board = analyzeBoardState();
+        board[x][y] = 'miss';
+    }
 }
 
 // Set interval to update the board regularly
