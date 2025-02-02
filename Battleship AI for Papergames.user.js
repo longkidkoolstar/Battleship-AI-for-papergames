@@ -21,6 +21,9 @@
     let confirmedHits = []; // Store coordinates of confirmed hits
     let activeTargets = []; // Queue for high-priority cells to guess
     let orientation = null; // Track current ship orientation ('horizontal' or 'vertical')
+    let lastTimerValue = null; // Add this at the top of your script with other global variables
+    let lastCheckTime = 0; // Add this at the top with other global variables
+    const CHECK_INTERVAL = 3000; // Milliseconds between checks
 
     // Function to analyze the current board state
     function analyzeBoardState() {
@@ -272,102 +275,109 @@ function waitForAttack(delay) {
 
 
 // Adjusted performAttack to add a 2-second delay and check board state
-async function performAttack(currentElementValue) {
+async function performAttack() {
+    console.log("PerformAttack Function Called");
     const now = Date.now();
-    
-    // Check if enough time has passed since the last attack (2 seconds)
-    if (now - lastAttackTime < 2000) {
-        console.log("Waiting for 2 seconds before the next attack.");
-        return;
-    }
-    
-    // Only perform an attack if the game is ready
-    if (!isGameReady()) {
-        console.log("Game is not ready. Waiting...");
-        return;
-    }
 
-    console.log('Performing attack based on current element value:', currentElementValue);
-
-    // Wait 2 seconds before the next attack
-    await waitForAttack(2000);
-
-    // Select cell to attack based on hunt or target mode
-    let cell = huntMode ? huntModeAttack() : targetModeAttack();
-    if (cell) {
-        attackCell(cell);
-        lastAttackTime = now; // Update the last attack time
-    } else {
-        console.log("No cell available to attack.");
-    }
-}
-    
-
-    GM.getValue('username').then(function(username) {
-        if (!username) {
-            username = prompt('Please enter your Papergames username:');
-            GM.setValue('username', username);
-        }
-    });
-
-// Update the updateBoard function to prioritize confirmed hits over question marks
-function updateBoard() {
-    var prevChronometerValue = '';
-    GM.getValue("username").then(function(username) {
-        var profileOpener = [...document.querySelectorAll(".text-truncate.cursor-pointer")].find(
-            opener => opener.textContent.trim() === username
-        );
-
-        var chronometer = document.querySelector("app-chronometer");
-        var numberElement = profileOpener.parentNode ? profileOpener.parentNode.querySelectorAll("span")[4] : null;
-        var profileOpenerParent = profileOpener.parentNode ? profileOpener.parentNode.parentNode : null;
-
-        var currentElement = chronometer || numberElement;
-        console.log("Current Element:", currentElement);
-
-        // Check for error message first
-        checkForErrorAndRefresh();
-        
-        // Check for confirmed hits first and handle all possible follow-ups
-        if (confirmedHits.length > 0) {
-            console.log("Following up on confirmed hits");
-            if (potentialTargets.length > 0) {
-                const nextTarget = potentialTargets.pop();
-                console.log("Attacking potential target around hit");
-                attackCell(nextTarget);
-                return;
-            }
-
-            // Try to generate new targets around ALL confirmed hits if no current targets
+    // Check for confirmed hits first and handle all possible follow-ups
+    if (confirmedHits.length > 0) {
+        console.log("Following up on confirmed hits");
+        if (potentialTargets.length > 0) {
+            const nextTarget = potentialTargets.pop();
+            console.log(`Attacking potential target around hit: (${nextTarget.row}, ${nextTarget.col})`);
+            attackCell(nextTarget);
+        } else {
             for (let i = confirmedHits.length - 1; i >= 0; i--) {
                 const hitCell = confirmedHits[i];
                 const cell = document.querySelector(`[data-row="${hitCell.row}"][data-col="${hitCell.col}"]`);
                 if (cell) {
-                    const newTargets = getAdjacentCells(cell).filter(adjCell => 
-                        !isHitWithSkull(adjCell) && 
+                    const newTargets = getAdjacentCells(cell).filter(adjCell =>
+                        !isHitWithSkull(adjCell) &&
                         !adjCell.querySelector('.miss')
                     );
                     if (newTargets.length > 0) {
                         console.log("Generated new targets around hit");
                         potentialTargets = potentialTargets.concat(newTargets);
-                        attackCell(potentialTargets.pop());
+                        const nextTarget = potentialTargets.pop();
+                        console.log(`Attacking generated target: (${nextTarget.row}, ${nextTarget.col})`);
+                        attackCell(nextTarget);
                         return;
                     }
                 }
             }
         }
-        
-        // Only check question marks if we have exhausted all hit-related moves
-        const questionMarkCells = Array.from(document.querySelectorAll('td')).filter(cell => hasQuestionMark(cell));
-        if (questionMarkCells.length > 0) {
-            console.log("No hits to follow up, targeting question mark");
-            attackCell(questionMarkCells[0]);
+    } else {
+        let cell = huntMode ? huntModeAttack() : targetModeAttack();
+        if (cell) {
+            attackCell(cell);
+        } else {
+            console.log("No cell available to attack.");
+        }
+    }
+
+    lastAttackTime = now;
+}
+
+GM.getValue('username').then(function(username) {
+    if (!username) {
+        username = prompt('Please enter your Papergames username:');
+        GM.setValue('username', username);
+    }
+});
+
+function updateBoard() {
+    // Add a delay between checks
+    const now = Date.now();
+    if (now - lastCheckTime < CHECK_INTERVAL) {
+        return;
+    }
+    lastCheckTime = now;
+
+    GM.getValue("username").then(async function(username) {
+        var profileOpener = [...document.querySelectorAll(".text-truncate.cursor-pointer")].find(
+            opener => opener.textContent.trim() === username
+        );
+
+        if (!profileOpener) {
+            console.log("Profile opener not found, waiting...");
             return;
         }
 
-        // Fall back to hunt mode if no other options
-        console.log("No hits or question marks, performing regular hunt mode attack");
-        performAttack(currentElement.textContent);
+        var chronometer = document.querySelector("app-chronometer");
+        var numberElement = profileOpener.parentNode ? profileOpener.parentNode.querySelectorAll("span")[4] : null;
+        var currentElement = chronometer || numberElement;
+
+        if (!currentElement) {
+            console.log("Timer element not found, waiting...");
+            return;
+        }
+
+        checkForErrorAndRefresh();
+
+        try {
+            var currentTime = parseInt(currentElement.textContent);
+            
+            // Check if it's our turn by verifying timer is changing
+            if (lastTimerValue !== null) {
+                const timeDiff = Math.abs(currentTime - lastTimerValue);
+                console.log(`Timer difference: ${timeDiff} seconds`);
+                
+                // Only proceed if the time difference is at least 3 seconds
+                if (timeDiff >= CHECK_INTERVAL/1000) {
+                    console.log(`Timer changed significantly from ${lastTimerValue} to ${currentTime} - It's our turn!`);
+                    // Only attack if we haven't already (timer decreasing)
+                    if (currentTime < lastTimerValue) {
+                        setTimeout(performAttack, CHECK_INTERVAL/1.5); // Slightly faster than check interval
+                    }
+                }
+            } else {
+                console.log(`Timer initialized at ${currentTime}`);
+            }
+            
+            lastTimerValue = currentTime;
+        } catch (error) {
+            console.error("Error updating board:", error);
+        }
     });
 }
 
@@ -397,19 +407,29 @@ function handleQuestionMarkCells() {
 function huntModeAttack() {
     console.log("AI is in Hunt Mode. Analyzing board state...");
     let cells = getAvailableCells();
-    
     if (cells.length === 0) {
         console.log("No available cells to attack!");
         return null;
     }
 
     // The cells are already sorted by probability score from getAvailableCells()
-    // So we'll take the highest scoring cell
     const bestCell = cells[0];
-    console.log("Selected cell with highest probability score");
-    return bestCell;
-}
+    console.log("Selected cell with highest probability score: ", bestCell);
 
+    // Extract the cell coordinates from the bestCell variable
+    const className = bestCell.className;
+    const regex = /cell-(\d+)-(\d+)/;
+    const match = className.match(regex);
+    if (match) {
+        const x = parseInt(match[1]);
+        const y = parseInt(match[2]);
+        console.log("Extracted cell coordinates: ", x, y);
+        return bestCell; // Return the bestCell directly
+    } else {
+        console.log("Failed to extract cell coordinates!");
+        return null;
+    }
+}
 // Function to handle targeting mode (focused attacks around a hit)
 function targetModeAttack() {
     if (potentialTargets.length > 0) {
@@ -453,20 +473,26 @@ function isAlreadyTargeted(x, y) {
 
 // Function to get the next guess
 function getNextGuess() {
+    console.log("Getting next guess...");
     if (activeTargets.length > 0) {
         // Prioritize finishing a ship
+        console.log("Active targets: ", activeTargets);
         return activeTargets.shift();
     }
     // Otherwise, fall back to probability-based hunt mode
+    console.log("No active targets, falling back to hunt mode...");
     return getNextHuntGuess();
 }
 
 // Function to get the next hunt guess
 function getNextHuntGuess() {
+    console.log("Getting next hunt guess...");
     const cells = getAvailableCells();
+//    console.log("Available cells: ", cells);
     if (cells.length > 0) {
         return cells[0];
     }
+    console.log("No available cells...");
     return null;
 }
 
@@ -550,5 +576,5 @@ function playTurn() {
 }
 
 // Set interval to update the board regularly
-setInterval(updateBoard, 1000); // Check every second
+setInterval(updateBoard, CHECK_INTERVAL);
 })();
