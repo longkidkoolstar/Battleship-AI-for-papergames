@@ -124,101 +124,101 @@
         return score;
     }
 
-    // Function to determine ship orientation from hits
-    function determineOrientation() {
-        if (confirmedHits.length < 2) return null;
-        
-        // Sort hits by row and column to find pattern
-        const sortedByRow = [...confirmedHits].sort((a, b) => a.row - b.row);
-        const sortedByCol = [...confirmedHits].sort((a, b) => a.col - b.col);
-        
-        // Check if hits are in same column (vertical)
-        if (sortedByCol[0].col === sortedByCol[1].col) {
-            return 'vertical';
-        }
-        // Check if hits are in same row (horizontal)
-        if (sortedByRow[0].row === sortedByRow[1].row) {
-            return 'horizontal';
-        }
-        return null;
-    }
 
-    // Function to generate adjacent cells around a hit cell
-    function getAdjacentCells(cell) {
-        const row = parseInt(cell.getAttribute('data-row'));
-        const col = parseInt(cell.getAttribute('data-col'));
-        let adjacentCells = [];
+
+// Modified handleAttackResult to track hits and determine orientation
+function handleAttackResult(cell) {
+    if (isHitWithSkull(cell)) {
+        const hitCoord = {
+            row: parseInt(cell.getAttribute('data-row')),
+            col: parseInt(cell.getAttribute('data-col'))
+        };
+        confirmedHits.push(hitCoord);
         
-        if (shipOrientation === 'vertical') {
-            // Only add cells above and below
-            adjacentCells.push(
-                document.querySelector(`[data-row="${row-1}"][data-col="${col}"]`),
-                document.querySelector(`[data-row="${row+1}"][data-col="${col}"]`)
-            );
-        } else if (shipOrientation === 'horizontal') {
-            // Only add cells left and right
-            adjacentCells.push(
-                document.querySelector(`[data-row="${row}"][data-col="${col-1}"]`),
-                document.querySelector(`[data-row="${row}"][data-col="${col+1}"]`)
-            );
-        } else {
-            // No orientation determined yet, check all directions
-            adjacentCells.push(
-                document.querySelector(`[data-row="${row-1}"][data-col="${col}"]`),
-                document.querySelector(`[data-row="${row+1}"][data-col="${col}"]`),
-                document.querySelector(`[data-row="${row}"][data-col="${col-1}"]`),
-                document.querySelector(`[data-row="${row}"][data-col="${col+1}"]`)
-            );
+        // Determine orientation if we have multiple hits
+        if (confirmedHits.length >= 2) {
+            shipOrientation = determineOrientation();
         }
         
-        // Filter out null cells and already attacked cells
-        return adjacentCells.filter(cell => 
-            cell && !cell.hasAttribute('data-result')
+        huntMode = false;
+        lastHit = cell;
+        
+        // Get adjacent cells for targeting
+        let adjacent = getAdjacentCells(cell);
+        potentialTargets.push(...adjacent.filter(adjCell => 
+            !isHitWithSkull(adjCell) && 
+            !adjCell.querySelector('.miss')
+        ));
+        
+        console.log('Added adjacent cells as potential targets:', potentialTargets);
+    } else if (cell.querySelector('.miss')) {
+        console.log('Miss on cell:', cell);
+        
+        // Check if we have 3 hits in a row and missed the fourth
+        if (confirmedHits.length >= 3) {
+            const lastThreeHits = confirmedHits.slice(-3);
+            const orientation = determineOrientation(lastThreeHits);
+            if (orientation) {
+                shipOrientation = orientation;
+                console.log('Following orientation:', shipOrientation);
+            }
+        }
+    }
+}
+
+// Modified getAdjacentCells to strictly follow determined orientation
+function getAdjacentCells(cell) {
+    const row = parseInt(cell.getAttribute('data-row'));
+    const col = parseInt(cell.getAttribute('data-col'));
+    let adjacentCells = [];
+    
+    if (shipOrientation === 'vertical') {
+        // Only add cells above and below
+        adjacentCells.push(
+            document.querySelector(`[data-row="${row-1}"][data-col="${col}"]`),
+            document.querySelector(`[data-row="${row+1}"][data-col="${col}"]`)
+        );
+    } else if (shipOrientation === 'horizontal') {
+        // Only add cells left and right
+        adjacentCells.push(
+            document.querySelector(`[data-row="${row}"][data-col="${col-1}"]`),
+            document.querySelector(`[data-row="${row}"][data-col="${col+1}"]`)
+        );
+    } else {
+        // No orientation determined yet, check all directions
+        adjacentCells.push(
+            document.querySelector(`[data-row="${row-1}"][data-col="${col}"]`),
+            document.querySelector(`[data-row="${row+1}"][data-col="${col}"]`),
+            document.querySelector(`[data-row="${row}"][data-col="${col-1}"]`),
+            document.querySelector(`[data-row="${row}"][data-col="${col+1}"]`)
         );
     }
+    
+    // Filter out null cells and already attacked cells
+    return adjacentCells.filter(cell => 
+        cell && !cell.hasAttribute('data-result')
+    );
+}
 
-    // Modified handleAttackResult to track hits
-    function handleAttackResult(cell) {
-        if (isHitWithSkull(cell)) {
-            const hitCoord = {
-                row: parseInt(cell.getAttribute('data-row')),
-                col: parseInt(cell.getAttribute('data-col'))
-            };
-            confirmedHits.push(hitCoord);
-            
-            // Determine orientation if we have multiple hits
-            if (confirmedHits.length >= 2) {
-                shipOrientation = determineOrientation();
-            }
-            
-            huntMode = false;
-            lastHit = cell;
-            
-            // Add adjacent cells as potential targets if they're valid
-            let adjacentCells = getAdjacentCells(cell);
-            if (shipOrientation) {
-                // If orientation is determined, prioritize cells in that direction
-                potentialTargets = potentialTargets.concat(
-                    adjacentCells.filter(adjCell => 
-                        !isHitWithSkull(adjCell) && 
-                        !adjCell.querySelector('.miss')
-                    )
-                );
-            } else {
-                // If no orientation, consider all directions
-                potentialTargets = potentialTargets.concat(
-                    adjacentCells.filter(adjCell => 
-                        !isHitWithSkull(adjCell) && 
-                        !adjCell.querySelector('.miss')
-                    )
-                );
-            }
-            
-            console.log('Added adjacent cells as potential targets:', potentialTargets);
-        } else if (cell.querySelector('.miss')) {
-            console.log('Miss on cell:', cell);
-        }
+// Function to determine orientation based on last three hits
+function determineOrientation(lastThreeHits) {
+    if (!lastThreeHits) {
+        lastThreeHits = confirmedHits.slice(-3);
     }
+    
+    const sortedByRow = lastThreeHits.sort((a, b) => a.row - b.row);
+    const sortedByCol = lastThreeHits.sort((a, b) => a.col - b.col);
+    
+    // Check if hits are in same column (vertical)
+    if (sortedByCol[0].col === sortedByCol[1].col && sortedByCol[1].col === sortedByCol[2].col) {
+        return 'vertical';
+    }
+    // Check if hits are in same row (horizontal)
+    if (sortedByRow[0].row === sortedByRow[1].row && sortedByRow[1].row === sortedByRow[2].row) {
+        return 'horizontal';
+    }
+    return null;
+}
 
     // Function to simulate a click on a cell and handle results
     function attackCell(cell) {
@@ -404,69 +404,9 @@ function targetModeAttack() {
     }
 }
 
-// Modified handleAttackResult to ensure proper mode tracking
-function handleAttackResult(cell) {
-    if (isHitWithSkull(cell)) {
-        const hitCoord = {
-            row: parseInt(cell.getAttribute('data-row')),
-            col: parseInt(cell.getAttribute('data-col'))
-        };
-        confirmedHits.push(hitCoord);
-        
-        // Determine orientation if we have multiple hits
-        if (confirmedHits.length >= 2) {
-            shipOrientation = determineOrientation();
-        }
-        
-        huntMode = false;
-        lastHit = cell;
-        
-        // Get adjacent cells for targeting
-        let adjacent = getAdjacentCells(cell);
-        potentialTargets.push(...adjacent.filter(adjCell => 
-            !isHitWithSkull(adjCell) && 
-            !adjCell.querySelector('.miss')
-        ));
-        
-        console.log('Added adjacent cells as potential targets:', potentialTargets);
-    } else if (cell.querySelector('.miss')) {
-        console.log('Miss on cell:', cell);
-    }
-}
 
-// Modified getAdjacentCells to strictly follow determined orientation
-function getAdjacentCells(cell) {
-    const row = parseInt(cell.getAttribute('data-row'));
-    const col = parseInt(cell.getAttribute('data-col'));
-    let adjacentCells = [];
-    
-    if (shipOrientation === 'vertical') {
-        // Only add cells above and below
-        adjacentCells.push(
-            document.querySelector(`[data-row="${row-1}"][data-col="${col}"]`),
-            document.querySelector(`[data-row="${row+1}"][data-col="${col}"]`)
-        );
-    } else if (shipOrientation === 'horizontal') {
-        // Only add cells left and right
-        adjacentCells.push(
-            document.querySelector(`[data-row="${row}"][data-col="${col-1}"]`),
-            document.querySelector(`[data-row="${row}"][data-col="${col+1}"]`)
-        );
-    } else {
-        // No orientation determined yet, check all directions
-        adjacentCells.push(
-            document.querySelector(`[data-row="${row-1}"][data-col="${col}"]`),
-            document.querySelector(`[data-row="${row+1}"][data-col="${col}"]`),
-            document.querySelector(`[data-row="${row}"][data-col="${col-1}"]`),
-            document.querySelector(`[data-row="${row}"][data-col="${col+1}"]`)
-        );
-    }
-    
-    // Filter out null cells and already attacked cells
-    return adjacentCells.filter(cell => 
-        cell && !cell.hasAttribute('data-result')
-    );
-}
+
+
 
 // Set interval to update the board regularly
 setInterval(updateBoard, 1000); // Check every second
