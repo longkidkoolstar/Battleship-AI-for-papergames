@@ -165,32 +165,40 @@ function handleAttackResult(cell) {
             col: col
         };
         confirmedHits.push(hitCoord);
+        console.log('Confirmed hit at:', hitCoord);
 
         // Determine orientation if we have multiple hits
         if (confirmedHits.length >= 2) {
             shipOrientation = determineOrientation();
+            console.log('Current ship orientation:', shipOrientation);
         }
 
         huntMode = false;
 
         // Get adjacent cells for targeting
         let adjacent = getAdjacentCells(cell);
-        potentialTargets.push(...adjacent.filter(adjCell =>
+        const newTargets = adjacent.filter(adjCell =>
             adjCell && !isHitWithSkull(adjCell) &&
             !adjCell.querySelector('.miss')
-        ));
+            // Note: We're no longer filtering out question marks
+        );
 
-        console.log('Added adjacent cells as potential targets:', potentialTargets);
+        if (newTargets.length > 0) {
+            potentialTargets.push(...newTargets);
+            console.log('Added adjacent cells as potential targets:', newTargets.length);
+        } else {
+            console.log('No new potential targets found around this hit');
+        }
     } else if (cell.querySelector('.miss')) {
-        console.log('Miss on cell:', cell);
+        console.log('Miss on cell:', getCellCoordinates(cell));
 
-        // Check if we have 3 hits in a row and missed the fourth
-        if (confirmedHits.length >= 3) {
-            const lastThreeHits = confirmedHits.slice(-3);
-            const orientation = determineOrientation(lastThreeHits);
+        // Check if we have at least 2 hits and missed a potential third
+        if (confirmedHits.length >= 2) {
+            // Try to determine orientation from existing hits
+            const orientation = determineOrientation();
             if (orientation) {
                 shipOrientation = orientation;
-                console.log('Following orientation:', shipOrientation);
+                console.log('Following orientation after miss:', shipOrientation);
             }
         }
     }
@@ -229,23 +237,51 @@ function getAdjacentCells(cell) {
     );
 }
 
-// Function to determine orientation based on last three hits
-function determineOrientation(lastThreeHits) {
-    if (!lastThreeHits) {
-        lastThreeHits = confirmedHits.slice(-3);
+// Function to determine orientation based on confirmed hits
+function determineOrientation(hitsToCheck) {
+    // If no hits are provided, use the confirmed hits
+    if (!hitsToCheck) {
+        hitsToCheck = confirmedHits.slice();
     }
 
-    const sortedByRow = lastThreeHits.sort((a, b) => a.row - b.row);
-    const sortedByCol = lastThreeHits.sort((a, b) => a.col - b.col);
+    // Need at least 2 hits to determine orientation
+    if (!hitsToCheck || hitsToCheck.length < 2) {
+        console.log('Not enough hits to determine orientation');
+        return null;
+    }
 
-    // Check if hits are in same column (vertical)
-    if (sortedByCol[0].col === sortedByCol[1].col && sortedByCol[1].col === sortedByCol[2].col) {
+    // Create copies of the arrays to avoid modifying the original
+    const sortedByRow = [...hitsToCheck].sort((a, b) => a.row - b.row);
+    const sortedByCol = [...hitsToCheck].sort((a, b) => a.col - b.col);
+
+    // Check if all hits are in the same column (vertical orientation)
+    let sameColumn = true;
+    for (let i = 1; i < sortedByCol.length; i++) {
+        if (sortedByCol[i].col !== sortedByCol[0].col) {
+            sameColumn = false;
+            break;
+        }
+    }
+
+    // Check if all hits are in the same row (horizontal orientation)
+    let sameRow = true;
+    for (let i = 1; i < sortedByRow.length; i++) {
+        if (sortedByRow[i].row !== sortedByRow[0].row) {
+            sameRow = false;
+            break;
+        }
+    }
+
+    if (sameColumn) {
+        console.log('Determined vertical orientation');
         return 'vertical';
     }
-    // Check if hits are in same row (horizontal)
-    if (sortedByRow[0].row === sortedByRow[1].row && sortedByRow[1].row === sortedByRow[2].row) {
+    if (sameRow) {
+        console.log('Determined horizontal orientation');
         return 'horizontal';
     }
+
+    console.log('Could not determine orientation');
     return null;
 }
 
@@ -306,6 +342,35 @@ function determineOrientation(lastThreeHits) {
         // Check if the question mark is in a strategic position (center or edges)
         if ((row > 2 && row < 7) && (col > 2 && col < 7)) {
             value += 2; // Center positions are more valuable
+        }
+
+        // Check if the question mark is aligned with confirmed hits
+        if (confirmedHits.length >= 2 && shipOrientation) {
+            let isAligned = false;
+
+            if (shipOrientation === 'horizontal') {
+                // Check if question mark is in the same row as any confirmed hit
+                for (const hit of confirmedHits) {
+                    if (hit.row === row) {
+                        isAligned = true;
+                        break;
+                    }
+                }
+            } else if (shipOrientation === 'vertical') {
+                // Check if question mark is in the same column as any confirmed hit
+                for (const hit of confirmedHits) {
+                    if (hit.col === col) {
+                        isAligned = true;
+                        break;
+                    }
+                }
+            }
+
+            // If aligned with confirmed hits, give it a significant bonus
+            if (isAligned) {
+                value += 8;
+                console.log(`Question mark at [${row},${col}] is aligned with ship orientation, adding bonus value`);
+            }
         }
 
         return value;
@@ -434,15 +499,22 @@ function updateBoard() {
                         return;
                     } else {
                         // If no new targets are generated, check all confirmed hits for potential targets
+                        // First, try to determine orientation from all confirmed hits
+                        if (confirmedHits.length >= 2 && !shipOrientation) {
+                            shipOrientation = determineOrientation();
+                            console.log('Determined orientation from all hits:', shipOrientation);
+                        }
+
+                        // Then check each hit for potential targets
                         confirmedHits.forEach(hit => {
                             const hitCell = document.querySelector(`[data-row="${hit.row}"][data-col="${hit.col}"]`);
                             if (hitCell) {
                                 const newTargets = getAdjacentCells(hitCell).filter(adjCell =>
-                                    !isHitWithSkull(adjCell) &&
+                                    adjCell && !isHitWithSkull(adjCell) &&
                                     !adjCell.querySelector('.miss')
                                 );
                                 if (newTargets.length > 0) {
-                                    console.log("Generated new targets around hit");
+                                    console.log("Generated new targets around hit at", hit);
                                     potentialTargets = potentialTargets.concat(newTargets);
                                     attackCell(potentialTargets.pop());
                                     return;
@@ -459,7 +531,38 @@ function updateBoard() {
         if (bestQuestionMark) {
             // If we have confirmed hits, decide whether to follow up or take a question mark
             if (confirmedHits.length > 0) {
-                // If the question mark has a very high value, consider taking it
+                // Check if the question mark is aligned with our confirmed hits
+                const [qmRow, qmCol] = getCellCoordinates(bestQuestionMark);
+                let isAligned = false;
+
+                if (shipOrientation === 'horizontal') {
+                    // Check if question mark is in the same row as any confirmed hit
+                    for (const hit of confirmedHits) {
+                        if (hit.row === qmRow) {
+                            isAligned = true;
+                            console.log(`Question mark at [${qmRow},${qmCol}] is aligned horizontally with hit at [${hit.row},${hit.col}]`);
+                            break;
+                        }
+                    }
+                } else if (shipOrientation === 'vertical') {
+                    // Check if question mark is in the same column as any confirmed hit
+                    for (const hit of confirmedHits) {
+                        if (hit.col === qmCol) {
+                            isAligned = true;
+                            console.log(`Question mark at [${qmRow},${qmCol}] is aligned vertically with hit at [${hit.row},${hit.col}]`);
+                            break;
+                        }
+                    }
+                }
+
+                // If the question mark is aligned with our hits, prioritize it
+                if (isAligned) {
+                    console.log("Found question mark aligned with confirmed hits, targeting it");
+                    attackCell(bestQuestionMark);
+                    return;
+                }
+
+                // If not aligned, evaluate its value
                 const questionMarkValue = evaluateQuestionMarkValue(bestQuestionMark);
 
                 // If the question mark is very valuable (near hits or in strategic position)
@@ -553,12 +656,89 @@ function huntModeAttack() {
 function targetModeAttack() {
     if (potentialTargets.length > 0) {
         console.log("AI is in Target Mode. Attacking potential target...");
+
+        // Check if any of the potential targets have question marks
+        // and prioritize them if they're in line with the ship orientation
+        if (shipOrientation) {
+            const questionMarkTargets = potentialTargets.filter(cell => hasQuestionMark(cell));
+
+            if (questionMarkTargets.length > 0) {
+                console.log("Found question mark(s) in potential targets, prioritizing them");
+
+                // Find the question mark that best aligns with our current orientation
+                const bestTarget = findBestAlignedQuestionMark(questionMarkTargets);
+                if (bestTarget) {
+                    // Remove this target from the potential targets list
+                    potentialTargets = potentialTargets.filter(cell => cell !== bestTarget);
+                    console.log("Targeting question mark that aligns with ship orientation");
+                    return bestTarget;
+                }
+            }
+        }
+
+        // If no question marks or no orientation, just take the next target
         return potentialTargets.pop();  // Attack one of the potential adjacent cells
     } else {
         console.log("No more potential targets around the last hit. Switching back to Hunt Mode.");
         huntMode = true;  // Switch back to Hunt Mode
         return huntModeAttack();
     }
+}
+
+// Function to find the best question mark that aligns with the ship orientation
+function findBestAlignedQuestionMark(questionMarkCells) {
+    if (!shipOrientation || questionMarkCells.length === 0) {
+        return null;
+    }
+
+    // If we have confirmed hits, try to find a question mark that aligns with them
+    if (confirmedHits.length >= 2) {
+        // Sort the hits to find the line they form
+        const sortedHits = [...confirmedHits];
+
+        if (shipOrientation === 'horizontal') {
+            sortedHits.sort((a, b) => a.col - b.col);
+
+            // Check each question mark to see if it's in the same row as the hits
+            for (const cell of questionMarkCells) {
+                const [row, col] = getCellCoordinates(cell);
+
+                // Check if this question mark is in the same row as our hits
+                if (row === sortedHits[0].row) {
+                    // Check if it's to the left or right of our current hits
+                    const leftmost = sortedHits[0].col;
+                    const rightmost = sortedHits[sortedHits.length - 1].col;
+
+                    if (col < leftmost || col > rightmost) {
+                        console.log(`Found aligned question mark at [${row},${col}] in horizontal orientation`);
+                        return cell;
+                    }
+                }
+            }
+        } else if (shipOrientation === 'vertical') {
+            sortedHits.sort((a, b) => a.row - b.row);
+
+            // Check each question mark to see if it's in the same column as the hits
+            for (const cell of questionMarkCells) {
+                const [row, col] = getCellCoordinates(cell);
+
+                // Check if this question mark is in the same column as our hits
+                if (col === sortedHits[0].col) {
+                    // Check if it's above or below our current hits
+                    const topmost = sortedHits[0].row;
+                    const bottommost = sortedHits[sortedHits.length - 1].row;
+
+                    if (row < topmost || row > bottommost) {
+                        console.log(`Found aligned question mark at [${row},${col}] in vertical orientation`);
+                        return cell;
+                    }
+                }
+            }
+        }
+    }
+
+    // If we couldn't find an aligned question mark, just return the first one
+    return questionMarkCells[0];
 }
 
 
