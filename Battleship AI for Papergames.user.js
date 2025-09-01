@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Battleship AI for Papergames
 // @namespace    github.io/longkidkoolstar
-// @version      2.2.0
-// @description  A probability-based AI for playing Battleship on papergames.io with toggleable visual probability overlay and statistical targeting
+// @version      3.0.0
+// @description  Advanced AI for Battleship on papergames.io with Bayesian inference, ship tracking, and probability visualization
 // @author       longkidkoolstar
 // @match        https://papergames.io/*
 // @grant        GM.setValue
@@ -15,6 +15,12 @@
     // Game state variables for probability calculations
     let confirmedHits = []; // Still needed for probability bonuses
     let visualizationEnabled = true; // Toggle for probability visualization
+    
+    // Ship tracking system
+    let remainingShips = [5, 4, 3, 3, 2]; // Standard Battleship ships: Carrier, Battleship, Cruiser, Submarine, Destroyer
+    let sunkShips = [];
+    let totalHitsOnBoard = 0;
+    let totalSunkCells = 0;
 
     // Enhanced function to analyze the current board state for probability calculations
     function analyzeBoardState() {
@@ -173,13 +179,58 @@
     // Ship sizes in standard Battleship
     const SHIP_SIZES = [5, 4, 3, 3, 2]; // Carrier, Battleship, Cruiser, Submarine, Destroyer
     
+    // Function to update ship tracking based on board analysis
+    function updateShipTracking(board) {
+        let currentHits = 0;
+        let currentSunk = 0;
+        
+        // Count current hits and sunk cells
+        for (let row = 0; row < 10; row++) {
+            for (let col = 0; col < 10; col++) {
+                if (board[row][col] === 'hit') currentHits++;
+                if (board[row][col] === 'destroyed') currentSunk++;
+            }
+        }
+        
+        // If sunk cells increased, a ship was destroyed
+        if (currentSunk > totalSunkCells) {
+            const newSunkCells = currentSunk - totalSunkCells;
+            
+            // Try to determine which ship was sunk based on size
+            // Find the largest remaining ship that matches the sunk size
+            for (let i = 0; i < remainingShips.length; i++) {
+                if (remainingShips[i] === newSunkCells) {
+                    sunkShips.push(remainingShips[i]);
+                    remainingShips.splice(i, 1);
+                    console.log(`Ship of size ${newSunkCells} sunk! Remaining ships:`, remainingShips);
+                    break;
+                }
+            }
+            
+            totalSunkCells = currentSunk;
+            confirmedHits = []; // Clear hits when ship is sunk
+        }
+        
+        totalHitsOnBoard = currentHits;
+        
+        return {
+            remainingShips: remainingShips.slice(),
+            sunkShips: sunkShips.slice(),
+            totalHits: currentHits,
+            totalSunk: currentSunk
+        };
+    }
+    
     // Enhanced probability calculation based on ship placement possibilities and density
     function calculateProbabilityScore(row, col, board) {
         let totalProbability = 0;
         let densityBonus = 0;
         
-        // For each ship size, calculate how many ways it can be placed through this cell
-        SHIP_SIZES.forEach(shipSize => {
+        // Update ship tracking first
+        const shipInfo = updateShipTracking(board);
+        
+        // Only calculate probabilities for remaining ships
+        remainingShips.forEach(shipSize => {
             let shipPlacements = 0;
             
             // Check horizontal placements
@@ -201,7 +252,9 @@
             }
             
             // Weight larger ships more heavily as they're harder to place
-            totalProbability += shipPlacements * (shipSize / 3);
+        // Apply Bayesian inference - adjust probability based on game state
+        const bayesianWeight = calculateBayesianWeight(shipSize, shipPlacements, board);
+        totalProbability += shipPlacements * bayesianWeight;
         });
         
         // Calculate density bonus - cells in areas with more possible ship placements
@@ -253,11 +306,134 @@
             totalProbability += qmValue * 2; // Double the question mark value
         }
         
-        return totalProbability + hitBonus + densityBonus;
+        // Add parity bonus for hunt mode (checkerboard pattern)
+        // This is most effective when no ships have been hit yet
+        if (totalHitsOnBoard === 0 && remainingShips.length === 5) {
+            // Use parity pattern - prefer cells where (row + col) % 2 === 0
+            // This ensures we hit every ship of size 2 or larger
+            if ((row + col) % 2 === 0) {
+                totalProbability += 10; // Significant bonus for parity cells
+            }
+        }
+        
+        // Endgame optimization - when few ships remain, be more aggressive
+        const endgameBonus = calculateEndgameBonus(row, col, board);
+        
+        return totalProbability + hitBonus + densityBonus + endgameBonus;
     }
     
-    // Enhanced function to check if a ship can be placed at a specific position
+    // Endgame optimization function
+    function calculateEndgameBonus(row, col, board) {
+        let bonus = 0;
+        const remainingShipCount = remainingShips.length;
+        const smallestShip = remainingShips.length > 0 ? Math.min(...remainingShips) : 2;
+        
+        // When only 1-2 ships remain, focus on isolated areas
+        if (remainingShipCount <= 2) {
+            // Check if this cell is in an isolated area (good for finding last ships)
+            let isolationScore = 0;
+            const checkRadius = 2;
+            
+            for (let r = row - checkRadius; r <= row + checkRadius; r++) {
+                for (let c = col - checkRadius; c <= col + checkRadius; c++) {
+                    if (r >= 0 && r < 10 && c >= 0 && c < 10 && board[r] && board[r][c]) {
+                        if (board[r][c] === 'available' || board[r][c] === 'unknown') {
+                            isolationScore++;
+                        }
+                    }
+                }
+            }
+            
+            // Prefer areas with more available cells (potential ship hiding spots)
+            bonus += isolationScore * 2;
+        }
+        
+        // When only the smallest ships remain, use different parity
+        if (remainingShipCount <= 3 && smallestShip === 2) {
+            // For destroyer hunting, any parity works, but prefer corners and edges
+            if (row === 0 || row === 9 || col === 0 || col === 9) {
+                bonus += 5; // Edge bonus
+            }
+            if ((row === 0 || row === 9) && (col === 0 || col === 9)) {
+                bonus += 3; // Corner bonus
+            }
+        }
+        
+        // When many ships are sunk, increase aggression in unexplored areas
+        if (sunkShips.length >= 3) {
+            // Count nearby misses - avoid areas with many misses
+            let nearbyMisses = 0;
+            for (let r = row - 1; r <= row + 1; r++) {
+                for (let c = col - 1; c <= col + 1; c++) {
+                    if (r >= 0 && r < 10 && c >= 0 && c < 10 && board[r] && board[r][c] === 'miss') {
+                        nearbyMisses++;
+                    }
+                }
+            }
+            
+            // Penalize cells near many misses
+            bonus -= nearbyMisses * 3;
+        }
+        
+        return bonus;
+    }
+    
+    // Bayesian inference for probability weighting
+    function calculateBayesianWeight(shipSize, shipPlacements, board) {
+        let baseWeight = shipSize / 3; // Original weighting
+        
+        // Prior probability adjustments based on ship size
+        const shipSizeMultiplier = {
+            5: 1.5, // Carrier is hardest to place
+            4: 1.3, // Battleship
+            3: 1.1, // Cruiser/Submarine
+            2: 0.9  // Destroyer is easiest to place
+        };
+        
+        baseWeight *= (shipSizeMultiplier[shipSize] || 1.0);
+        
+        // Likelihood adjustments based on current board state
+        const gameProgress = (totalSunkCells + totalHitsOnBoard) / 17; // Total ship cells = 17
+        
+        // Early game: prefer larger ships (they're more likely to be hit first)
+        if (gameProgress < 0.3) {
+            if (shipSize >= 4) {
+                baseWeight *= 1.2;
+            }
+        }
+        // Mid game: balanced approach
+        else if (gameProgress < 0.7) {
+            baseWeight *= 1.0; // No adjustment
+        }
+        // Late game: focus on remaining ships
+        else {
+            // If this is one of the few remaining ships, increase its weight
+            if (remainingShips.includes(shipSize)) {
+                const rarityBonus = 5.0 / remainingShips.length; // More rare = higher weight
+                baseWeight *= (1.0 + rarityBonus);
+            }
+        }
+        
+        // Posterior probability: adjust based on observed hit patterns
+        if (totalHitsOnBoard > 0) {
+            // If we have hits, ships near hits are more likely
+            // This is handled in the hit bonus, but we can adjust the base weight too
+            if (shipPlacements > 0) {
+                baseWeight *= 1.1; // Small bonus for ships that can be placed
+            }
+        }
+        
+        // Constraint satisfaction: heavily penalize impossible placements
+        if (shipPlacements === 0) {
+            return 0; // Impossible placement
+        }
+        
+        return baseWeight;
+    }
+    
+    // Enhanced function to check if a ship can be placed at a specific position with pattern recognition
     function canPlaceShip(startRow, startCol, shipSize, orientation, board) {
+        // First check basic placement validity
         for (let i = 0; i < shipSize; i++) {
             const checkRow = orientation === 'vertical' ? startRow + i : startRow;
             const checkCol = orientation === 'horizontal' ? startCol + i : startCol;
@@ -273,27 +449,56 @@
             }
         }
         
-        // Additional check: ensure ship placement doesn't conflict with known ship patterns
-        // This helps avoid placing ships too close to already destroyed ships
-        const buffer = 1;
-        for (let i = -buffer; i < shipSize + buffer; i++) {
-            const checkRow = orientation === 'vertical' ? startRow + i : startRow;
-            const checkCol = orientation === 'horizontal' ? startCol + i : startCol;
+        // Advanced pattern recognition: Check ship spacing constraints
+        // Most Battleship variants don't allow ships to touch each other
+        for (let i = 0; i < shipSize; i++) {
+            const shipRow = orientation === 'vertical' ? startRow + i : startRow;
+            const shipCol = orientation === 'horizontal' ? startCol + i : startCol;
             
-            if (checkRow >= 0 && checkRow < 10 && checkCol >= 0 && checkCol < 10) {
-                // If we find a destroyed cell adjacent to our potential ship placement,
-                // we need to be more careful about placement
-                if (board[checkRow] && board[checkRow][checkCol] === 'destroyed') {
-                    // Only allow if this destroyed cell could be part of our ship
-                    if (i >= 0 && i < shipSize) {
-                        continue; // This is fine, destroyed cell is part of our ship
-                    } else {
-                        // Destroyed cell is adjacent, which might indicate ship spacing rules
-                        // For now, we'll allow it but this could be enhanced based on game rules
+            // Check all 8 adjacent cells for destroyed ships (diagonal touching rule)
+            const adjacentPositions = [
+                [shipRow-1, shipCol-1], [shipRow-1, shipCol], [shipRow-1, shipCol+1],
+                [shipRow, shipCol-1],                          [shipRow, shipCol+1],
+                [shipRow+1, shipCol-1], [shipRow+1, shipCol], [shipRow+1, shipCol+1]
+            ];
+            
+            for (const [adjRow, adjCol] of adjacentPositions) {
+                if (adjRow >= 0 && adjRow < 10 && adjCol >= 0 && adjCol < 10) {
+                    if (board[adjRow] && board[adjRow][adjCol] === 'destroyed') {
+                        // Check if this destroyed cell could be part of our current ship
+                        let isPartOfCurrentShip = false;
+                        for (let j = 0; j < shipSize; j++) {
+                            const currentShipRow = orientation === 'vertical' ? startRow + j : startRow;
+                            const currentShipCol = orientation === 'horizontal' ? startCol + j : startCol;
+                            if (adjRow === currentShipRow && adjCol === currentShipCol) {
+                                isPartOfCurrentShip = true;
+                                break;
+                            }
+                        }
+                        
+                        // If it's not part of our ship, this placement violates spacing rules
+                        if (!isPartOfCurrentShip) {
+                            return false;
+                        }
                     }
                 }
             }
         }
+        
+        // Check for consistency with existing hits
+        // If there are hits that should be part of this ship, ensure they align
+        let hitsInShip = 0;
+        for (let i = 0; i < shipSize; i++) {
+            const checkRow = orientation === 'vertical' ? startRow + i : startRow;
+            const checkCol = orientation === 'horizontal' ? startCol + i : startCol;
+            
+            if (board[checkRow] && board[checkRow][checkCol] === 'hit') {
+                hitsInShip++;
+            }
+        }
+        
+        // If this ship placement would include hits, it's more likely to be correct
+        // This is handled in the probability calculation as a bonus
         
         return true;
     }
