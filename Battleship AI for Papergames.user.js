@@ -1309,8 +1309,8 @@ function checkForErrorAndRefresh() {
     }
 
     function clickLeaveRoomButton() {
-        var leaveRoomButton = document.querySelector("button.btn-light.ng-tns-c189-7");
-        if (leaveRoomButton) {
+        var leaveRoomButton = document.querySelector('span.front.text.btn.btn-light');
+        if (leaveRoomButton && leaveRoomButton.textContent.includes('Leave room')) {
             leaveRoomButton.click();
         }
     }
