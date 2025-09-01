@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Battleship AI for Papergames
 // @namespace    github.io/longkidkoolstar
-// @version      4.1.4
+// @version      4.1.9
 // @description  Advanced AI for Battleship on papergames.io with strategic weapon selection, Bayesian inference, and probability visualization
 // @author       longkidkoolstar
 // @match        https://papergames.io/*
@@ -33,6 +33,7 @@
     // Weapon detection system
     function detectAvailableWeapons() {
         const weaponButtons = document.querySelectorAll('.weapon-button');
+        console.log(`Found ${weaponButtons.length} weapon buttons`);
         
         availableWeapons = {
             default: true,
@@ -41,18 +42,23 @@
             nuclearBomb: 0
         };
         
-        weaponButtons.forEach(button => {
+        weaponButtons.forEach((button, index) => {
             const img = button.querySelector('img');
             const badge = button.querySelector('.badge');
             const isDisabled = button.hasAttribute('disabled');
+            
+            console.log(`Button ${index}: img=${!!img}, badge=${!!badge}, disabled=${isDisabled}`);
             
             if (img && badge) {
                 const weaponType = img.getAttribute('alt');
                 const count = parseInt(badge.textContent) || 0;
                 
+                console.log(`  Weapon type: ${weaponType}, count: ${count}, badge text: '${badge.textContent}'`);
+                
                 switch(weaponType) {
                     case 'missile':
                         availableWeapons.missile = isDisabled ? 0 : count;
+                        console.log(`  Set missile count to: ${availableWeapons.missile}`);
                         break;
                     case 'fragment-bomb':
                         availableWeapons.fragmentBomb = isDisabled ? 0 : count;
@@ -64,10 +70,12 @@
                         availableWeapons.default = true;
                         break;
                 }
+            } else {
+                console.log(`  Button ${index} missing img or badge`);
             }
         });
         
-        console.log('Available weapons:', availableWeapons);
+        console.log('Final available weapons:', availableWeapons);
         return availableWeapons;
     }
     
@@ -78,43 +86,58 @@
         const gameProgress = (totalSunkCells + totalHitsOnBoard) / 17;
         const hasConfirmedHits = confirmedHits.length > 0;
         
+        console.log(`=== WEAPON SELECTION DEBUG ===`);
+        console.log(`Target: [${targetRow},${targetCol}], Game Progress: ${gameProgress.toFixed(2)}, Has Hits: ${hasConfirmedHits}`);
+        console.log(`Available weapons:`, availableWeapons);
+        
         // Nuclear bomb strategy - maximum area coverage
         if (availableWeapons.nuclearBomb > 0) {
+            console.log(`Checking nuclear bomb...`);
             if (shouldUseNuclearBomb(targetRow, targetCol, board, probabilityScores, gameProgress)) {
+                console.log(`NUCLEAR BOMB SELECTED!`);
                 return 'nuclear-bomb';
             }
         }
         
         // Fragment bomb strategy - high probability clusters
         if (availableWeapons.fragmentBomb > 0) {
+            console.log(`Checking fragment bomb...`);
             if (shouldUseFragmentBomb(targetRow, targetCol, board, probabilityScores, gameProgress)) {
+                console.log(`FRAGMENT BOMB SELECTED!`);
                 return 'fragment-bomb';
             }
         }
         
         // Missile strategy - confirmed hits and surrounding area
         if (availableWeapons.missile > 0) {
+            console.log(`Checking missile (count: ${availableWeapons.missile})...`);
             if (shouldUseMissile(targetRow, targetCol, board, hasConfirmedHits, gameProgress)) {
+                console.log(`MISSILE SELECTED!`);
                 return 'missile';
+            } else {
+                console.log(`Missile not selected - conditions not met`);
             }
+        } else {
+            console.log(`No missiles available (count: ${availableWeapons.missile})`);
         }
         
         // Default to single shot
+        console.log(`Defaulting to single shot`);
         return 'default';
     }
     
     // Nuclear bomb strategy: 3x3 area with corners
     function shouldUseNuclearBomb(targetRow, targetCol, board, probabilityScores, gameProgress) {
-        // Early game: use for maximum coverage in unexplored areas
-        if (gameProgress < 0.3) {
+        // Early game: use only for maximum coverage in completely unexplored areas
+        if (gameProgress < 0.2) {
             const coverageScore = calculateNuclearCoverage(targetRow, targetCol, board);
-            return coverageScore >= 7; // At least 7 unknown cells in pattern
+            return coverageScore >= 8; // At least 8 unknown cells in pattern (nearly full coverage)
         }
         
-        // Mid-late game: use when high probability cluster detected
-        if (gameProgress >= 0.3) {
+        // Mid-late game: use only when extremely high probability cluster detected
+        if (gameProgress >= 0.2) {
             const clusterScore = calculateClusterProbability(targetRow, targetCol, probabilityScores, 'nuclear');
-            return clusterScore >= 15; // High combined probability in nuclear pattern
+            return clusterScore >= 20; // Very high combined probability in nuclear pattern
         }
         
         return false;
@@ -124,16 +147,16 @@
     function shouldUseFragmentBomb(targetRow, targetCol, board, probabilityScores, gameProgress) {
         // Best for confirmed hits to clear surrounding area efficiently
         if (confirmedHits.length > 0) {
-            const nearHit = isNearConfirmedHit(targetRow, targetCol, 2);
+            const nearHit = isNearConfirmedHit(targetRow, targetCol, 1); // More precise targeting
             if (nearHit) {
                 const coverageScore = calculateFragmentCoverage(targetRow, targetCol, board);
-                return coverageScore >= 3; // At least 3 unknown cells in cross pattern
+                return coverageScore >= 4; // Require full coverage for efficiency
             }
         }
         
-        // High probability cross pattern
+        // High probability cross pattern - more restrictive
         const clusterScore = calculateClusterProbability(targetRow, targetCol, probabilityScores, 'fragment');
-        return clusterScore >= 12; // High combined probability in cross pattern
+        return clusterScore >= 16; // Higher threshold for probability-based usage
     }
     
     // Missile strategy: 5 hits in plus pattern
@@ -141,38 +164,32 @@
         const coverageScore = calculateMissileCoverage(targetRow, targetCol, board);
         console.log(`Missile evaluation at [${targetRow},${targetCol}]: coverage=${coverageScore}, hasHits=${hasConfirmedHits}, progress=${gameProgress.toFixed(2)}`);
         
-        // Perfect for finishing off damaged ships - relaxed distance requirement
+        // Perfect for finishing off damaged ships
         if (hasConfirmedHits) {
-            const nearHit = isNearConfirmedHit(targetRow, targetCol, 2); // Increased from 1 to 2
-            if (nearHit && coverageScore >= 2) {
+            const nearHit = isNearConfirmedHit(targetRow, targetCol, 1);
+            if (nearHit && coverageScore >= 3) {
                 console.log(`Missile selected: Near confirmed hit with coverage ${coverageScore}`);
-                return true; // Reduced from 3 to 2 unknown cells
+                return true; // Use missile near hits with good coverage
             }
         }
         
-        // Early-mid game exploration with good coverage - extended game progress window
-        if (gameProgress < 0.6 && coverageScore >= 3) { // Increased from 0.4 to 0.6
-            console.log(`Missile selected: Early-mid game exploration with coverage ${coverageScore}`);
-            return true; // Reduced from 4 to 3 unknown cells
+        // Early game exploration with excellent coverage
+        if (gameProgress < 0.4 && coverageScore >= 4) {
+            console.log(`Missile selected: Early game exploration with coverage ${coverageScore}`);
+            return true; // Use missiles for early exploration with full coverage
         }
         
-        // Mid-late game: use missiles for efficient area coverage
-        if (gameProgress >= 0.6 && coverageScore >= 4) {
-            console.log(`Missile selected: Late game area coverage with coverage ${coverageScore}`);
-            return true; // Use missiles when they can hit 4+ unknown cells
-        }
-        
-        // Question mark targeting: missiles are great for question marks
+        // Question mark targeting: missiles are effective for question marks
         const centerCell = getCellByCoordinates(targetRow, targetCol);
-        if (centerCell && hasQuestionMark(centerCell) && coverageScore >= 2) {
+        if (centerCell && hasQuestionMark(centerCell) && coverageScore >= 3) {
             console.log(`Missile selected: Question mark targeting with coverage ${coverageScore}`);
-            return true; // Use missile on question marks with decent coverage
+            return true; // Use missile on question marks with good coverage
         }
         
-        // High probability areas: use missiles in areas with good potential
-        if (coverageScore >= 4) {
-            console.log(`Missile selected: High coverage area with coverage ${coverageScore}`);
-            return true; // Always use missiles when they can cover 4+ unknown cells
+        // High value areas: use missiles when they provide maximum benefit
+        if (coverageScore >= 5) {
+            console.log(`Missile selected: Maximum coverage area with coverage ${coverageScore}`);
+            return true; // Only use missiles when they can hit all 5 cells
         }
         
         return false;
@@ -189,7 +206,7 @@
         
         return positions.filter(([r, c]) => 
             r >= 0 && r < 10 && c >= 0 && c < 10 && 
-            (board[r][c] === 'unknown' || board[r][c] === 'question')
+            (board[r][c] === 'available' || board[r][c] === 'question')
         ).length;
     }
     
@@ -202,7 +219,7 @@
         
         return positions.filter(([r, c]) => 
             r >= 0 && r < 10 && c >= 0 && c < 10 && 
-            (board[r][c] === 'unknown' || board[r][c] === 'question')
+            (board[r][c] === 'available' || board[r][c] === 'question')
         ).length;
     }
     
@@ -213,10 +230,22 @@
             [row-1, col], [row+1, col], [row, col-1], [row, col+1] // adjacent
         ];
         
-        return positions.filter(([r, c]) => 
+        console.log(`=== MISSILE COVERAGE DEBUG at [${row},${col}] ===`);
+        positions.forEach(([r, c]) => {
+            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
+                console.log(`  Position [${r},${c}]: ${board[r][c]}`);
+            } else {
+                console.log(`  Position [${r},${c}]: out of bounds`);
+            }
+        });
+        
+        const validTargets = positions.filter(([r, c]) => 
             r >= 0 && r < 10 && c >= 0 && c < 10 && 
-            (board[r][c] === 'unknown' || board[r][c] === 'question')
-        ).length;
+            (board[r][c] === 'available' || board[r][c] === 'question')
+        );
+        
+        console.log(`  Valid targets: ${validTargets.length}`);
+        return validTargets.length;
     }
     
     function calculateClusterProbability(row, col, probabilityScores, weaponType) {
@@ -254,27 +283,43 @@
     
     // Weapon execution system
     function selectAndUseWeapon(weaponType) {
-        const weaponButtons = document.querySelectorAll('.weapon-button');
+        console.log(`=== WEAPON EXECUTION DEBUG ===`);
+        console.log(`Attempting to select weapon: ${weaponType}`);
         
-        weaponButtons.forEach(button => {
+        const weaponButtons = document.querySelectorAll('.weapon-button');
+        console.log(`Found ${weaponButtons.length} weapon buttons for selection`);
+        
+        let weaponFound = false;
+        let weaponSelected = false;
+        
+        weaponButtons.forEach((button, index) => {
             const img = button.querySelector('img');
             if (img) {
                 const currentWeapon = img.getAttribute('alt');
+                console.log(`Button ${index}: weapon type = ${currentWeapon}`);
                 
                 // Remove current selection
                 button.classList.remove('is-selected');
                 
                 // Select the desired weapon
                 if (currentWeapon === weaponType) {
+                    weaponFound = true;
                     button.classList.add('is-selected');
                     button.click();
-                    console.log(`Selected weapon: ${weaponType}`);
+                    console.log(`Successfully selected weapon: ${weaponType}`);
+                    weaponSelected = true;
                     return true;
                 }
+            } else {
+                console.log(`Button ${index}: no img found`);
             }
         });
         
-        return false;
+        if (!weaponFound) {
+            console.log(`ERROR: Weapon type '${weaponType}' not found in available buttons`);
+        }
+        
+        return weaponSelected;
     }
     
     // Helper function to get cell coordinates
@@ -1222,7 +1267,7 @@ function findBestProbabilityCell() {
             const [row, col] = getCellCoordinates(cell);
             const score = calculateProbabilityScore(row, col, board);
             
-            console.log(`Cell [${row},${col}] probability score: ${score}`);
+            // console.log(`Cell [${row},${col}] probability score: ${score}`);
             
             if (score > bestScore) {
                 bestScore = score;
