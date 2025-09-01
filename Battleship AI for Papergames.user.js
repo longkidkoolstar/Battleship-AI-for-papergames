@@ -1002,10 +1002,11 @@ function determineOrientation(hitsToCheck) {
         }
 
         // Check if the question mark is aligned with confirmed hits
-        if (confirmedHits.length >= 2 && shipOrientation) {
+        if (confirmedHits.length >= 2) {
+            const shipOrientation = determineOrientation(confirmedHits);
             let isAligned = false;
 
-            if (shipOrientation === 'horizontal') {
+            if (shipOrientation && shipOrientation === 'horizontal') {
                 // Check if question mark is in the same row as any confirmed hit
                 for (const hit of confirmedHits) {
                     if (hit.row === row) {
@@ -1013,7 +1014,7 @@ function determineOrientation(hitsToCheck) {
                         break;
                     }
                 }
-            } else if (shipOrientation === 'vertical') {
+            } else if (shipOrientation && shipOrientation === 'vertical') {
                 // Check if question mark is in the same column as any confirmed hit
                 for (const hit of confirmedHits) {
                     if (hit.col === col) {
