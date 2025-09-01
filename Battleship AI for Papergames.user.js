@@ -16,6 +16,10 @@
     let confirmedHits = []; // Still needed for probability bonuses
     let visualizationEnabled = true; // Toggle for probability visualization
     
+    // Auto queue variables
+    let isAutoQueueOn = false;
+    let autoQueueToggleButton = null;
+    
     // Ship tracking system
     let remainingShips = [5, 4, 3, 3, 2]; // Standard Battleship ships: Carrier, Battleship, Cruiser, Submarine, Destroyer
     let sunkShips = [];
@@ -1293,15 +1297,49 @@ function checkForErrorAndRefresh() {
 
 
 
-    // Create toggle button for probability visualization
+    // Auto queue functions
+    function toggleAutoQueue() {
+        // Toggle the state
+        isAutoQueueOn = !isAutoQueueOn;
+        GM.setValue('isToggled', isAutoQueueOn);
+
+        // Update the button text and style based on the state
+        autoQueueToggleButton.textContent = isAutoQueueOn ? 'Auto Queue On' : 'Auto Queue Off';
+        autoQueueToggleButton.style.backgroundColor = isAutoQueueOn ? 'green' : 'red';
+    }
+
+    function clickLeaveRoomButton() {
+        var leaveRoomButton = document.querySelector("button.btn-light.ng-tns-c189-7");
+        if (leaveRoomButton) {
+            leaveRoomButton.click();
+        }
+    }
+
+    function clickPlayOnlineButton() {
+        var playOnlineButton = document.querySelector('span.front.text.btn.btn-secondary.btn-lg.text-start.juicy-btn-inner');
+        if (playOnlineButton) {
+            playOnlineButton.click();
+        }
+    }
+
+    // Periodically check for buttons when the toggle is on
+    function checkButtonsPeriodically() {
+        if (isAutoQueueOn) {
+            clickLeaveRoomButton();
+            clickPlayOnlineButton();
+        }
+    }
+
+    // Create toggle buttons for probability visualization and auto queue
     function createToggleButton() {
-        // Check if button already exists
+        // Check if buttons already exist
         if (document.getElementById('probability-toggle')) return;
         
-        const button = document.createElement('button');
-        button.id = 'probability-toggle';
-        button.textContent = 'Toggle Probability View';
-        button.style.cssText = `
+        // Probability toggle button
+        const probButton = document.createElement('button');
+        probButton.id = 'probability-toggle';
+        probButton.textContent = 'Toggle Probability View';
+        probButton.style.cssText = `
             position: fixed;
             top: 10px;
             right: 10px;
@@ -1317,13 +1355,43 @@ function checkForErrorAndRefresh() {
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         `;
         
-        button.addEventListener('click', function() {
+        probButton.addEventListener('click', function() {
             const enabled = window.toggleProbabilityVisualization();
-            button.style.background = enabled ? '#4CAF50' : '#f44336';
-            button.textContent = enabled ? 'Hide Probability View' : 'Show Probability View';
+            probButton.style.background = enabled ? '#4CAF50' : '#f44336';
+            probButton.textContent = enabled ? 'Hide Probability View' : 'Show Probability View';
         });
         
-        document.body.appendChild(button);
+        // Auto queue toggle button
+        autoQueueToggleButton = document.createElement('button');
+        autoQueueToggleButton.id = 'auto-queue-toggle';
+        autoQueueToggleButton.textContent = 'Auto Queue Off';
+        autoQueueToggleButton.style.cssText = `
+            position: fixed;
+            top: 50px;
+            right: 10px;
+            z-index: 10000;
+            padding: 8px 12px;
+            background: red;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        `;
+        
+        autoQueueToggleButton.addEventListener('click', toggleAutoQueue);
+        
+        // Load saved auto queue state
+        GM.getValue('isToggled', false).then(function(savedState) {
+            isAutoQueueOn = savedState;
+            autoQueueToggleButton.textContent = isAutoQueueOn ? 'Auto Queue On' : 'Auto Queue Off';
+            autoQueueToggleButton.style.backgroundColor = isAutoQueueOn ? 'green' : 'red';
+        });
+        
+        document.body.appendChild(probButton);
+        document.body.appendChild(autoQueueToggleButton);
     }
     
     // Initialize toggle button when DOM is ready
@@ -1332,6 +1400,9 @@ function checkForErrorAndRefresh() {
     } else {
         createToggleButton();
     }
+
+// Set up periodic checking for auto queue
+setInterval(checkButtonsPeriodically, 1000);
 
 // Set interval to update the board regularly
 setInterval(updateBoard, 1000); // Check every second
