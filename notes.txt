@@ -1,0 +1,7 @@
+<button _ngcontent-serverapp-c1641377241="" class="weapon-button ng-star-inserted"><img _ngcontent-serverapp-c1641377241="" alt="missile" src="assets/images/symbols/battleships/missile.svg"><span _ngcontent-serverapp-c1641377241="" class="badge ng-star-inserted">1</span><!----></button>  - hits in a one tile raius from middle of where you clicked including where you clicked ei one up,down,left and right
+
+<button _ngcontent-serverapp-c1641377241="" class="weapon-button ng-star-inserted" disabled=""><img _ngcontent-serverapp-c1641377241="" alt="fragment-bomb" src="assets/images/symbols/battleships/fragment-bomb.svg"><span _ngcontent-serverapp-c1641377241="" class="badge ng-star-inserted">0</span><!----></button> - drops 3 bombs(hits) on top of where you clicked making the total 4
+
+<button _ngcontent-serverapp-c1641377241="" class="weapon-button ng-star-inserted" disabled=""><img _ngcontent-serverapp-c1641377241="" alt="nuclear-bomb" src="assets/images/symbols/battleships/nuclear-bomb.svg"><span _ngcontent-serverapp-c1641377241="" class="badge ng-star-inserted">0</span><!----></button> - two in each side(up, down, left, right) and one hit in the the sides. top right,top left, bottom left, bottom right of where you clicked with it including where the place you clicked
+
+<button _ngcontent-serverapp-c1641377241="" class="weapon-button is-selected ng-star-inserted"><img _ngcontent-serverapp-c1641377241="" alt="default" src="assets/images/symbols/battleships/default.svg"><!----></button> - the normal single hit one.
