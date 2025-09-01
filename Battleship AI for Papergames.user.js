@@ -7,6 +7,7 @@
 // @match        https://papergames.io/*
 // @grant        GM.setValue
 // @grant        GM.getValue
+// @license      MIT
 // ==/UserScript==
 
 (function() {
