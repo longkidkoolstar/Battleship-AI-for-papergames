@@ -1241,33 +1241,6 @@ function checkForErrorAndRefresh() {
         location.reload();
     }
 }
-
-// Function to find the best question mark cell (used by other functions)
-function findBestQuestionMarkCell() {
-    const questionCells = document.querySelectorAll('.gift.animated.tin-in .fa-question');
-    if (questionCells.length > 0) {
-        // Evaluate all question mark cells and pick the best one
-        const questionMarkElements = Array.from(questionCells).map(q => q.closest('.gift'));
-        const cellsWithValues = questionMarkElements.map(cell => {
-            if (!cell) return null;
-            const tdCell = cell.closest('td');
-            if (!tdCell) return null;
-            return {
-                cell: tdCell,
-                value: evaluateQuestionMarkValue(tdCell)
-            };
-        }).filter(item => item !== null);
-
-        // Sort by value and return the best one
-        if (cellsWithValues.length > 0) {
-            cellsWithValues.sort((a, b) => b.value - a.value);
-            console.log("Found best question mark with value: " + cellsWithValues[0].value);
-            return cellsWithValues[0].cell;
-        }
-    }
-    return null;
-}
-
 // Legacy functions removed - now using pure probability-based targeting
 
 
