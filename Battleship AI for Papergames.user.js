@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Battleship AI for Papergames
 // @namespace    github.io/longkidkoolstar
-// @version      1.0.2
+// @version      1.0.3
 // @description  An enhanced AI for playing Battleship on papergames.io with strategic moves and console logging
 // @author       longkidkoolstar
 // @match        https://papergames.io/*
@@ -526,60 +526,16 @@ function updateBoard() {
             }
         }
 
-        // Handle question marks more intelligently
-        const bestQuestionMark = findBestQuestionMarkCell();
-        if (bestQuestionMark) {
-            // If we have confirmed hits, decide whether to follow up or take a question mark
-            if (confirmedHits.length > 0) {
-                // Check if the question mark is aligned with our confirmed hits
-                const [qmRow, qmCol] = getCellCoordinates(bestQuestionMark);
-                let isAligned = false;
-
-                if (shipOrientation === 'horizontal') {
-                    // Check if question mark is in the same row as any confirmed hit
-                    for (const hit of confirmedHits) {
-                        if (hit.row === qmRow) {
-                            isAligned = true;
-                            console.log(`Question mark at [${qmRow},${qmCol}] is aligned horizontally with hit at [${hit.row},${hit.col}]`);
-                            break;
-                        }
-                    }
-                } else if (shipOrientation === 'vertical') {
-                    // Check if question mark is in the same column as any confirmed hit
-                    for (const hit of confirmedHits) {
-                        if (hit.col === qmCol) {
-                            isAligned = true;
-                            console.log(`Question mark at [${qmRow},${qmCol}] is aligned vertically with hit at [${hit.row},${hit.col}]`);
-                            break;
-                        }
-                    }
-                }
-
-                // If the question mark is aligned with our hits, prioritize it
-                if (isAligned) {
-                    console.log("Found question mark aligned with confirmed hits, targeting it");
-                    attackCell(bestQuestionMark);
-                    return;
-                }
-
-                // If not aligned, evaluate its value
-                const questionMarkValue = evaluateQuestionMarkValue(bestQuestionMark);
-
-                // If the question mark is very valuable (near hits or in strategic position)
-                // or if we've been struggling to find more hits, take the question mark
-                if (questionMarkValue > 10 || (confirmedHits.length === 1 && potentialTargets.length === 0)) {
-                    console.log("Found high-value question mark (value: " + questionMarkValue + "), targeting it");
-                    attackCell(bestQuestionMark);
-                    return;
-                } else {
-                    console.log("Question mark available but continuing to follow up on hits");
-                }
-            } else {
-                // If no confirmed hits, always take the best question mark
-                console.log("No hits to follow up, targeting best question mark");
+        // Only consider question marks if there are NO confirmed hits to follow up on
+        if (confirmedHits.length === 0) {
+            const bestQuestionMark = findBestQuestionMarkCell();
+            if (bestQuestionMark) {
+                console.log("No confirmed hits to follow up, targeting best question mark");
                 attackCell(bestQuestionMark);
                 return;
             }
+        } else {
+            console.log("Confirmed hits present - ignoring question marks until ships are finished off");
         }
 
         // Fall back to hunt mode if no other options
