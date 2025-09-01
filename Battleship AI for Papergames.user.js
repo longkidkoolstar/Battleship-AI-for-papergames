@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Battleship AI for Papergames
 // @namespace    github.io/longkidkoolstar
-// @version      4.1.3
+// @version      4.1.4
 // @description  Advanced AI for Battleship on papergames.io with strategic weapon selection, Bayesian inference, and probability visualization
 // @author       longkidkoolstar
 // @match        https://papergames.io/*
@@ -138,19 +138,41 @@
     
     // Missile strategy: 5 hits in plus pattern
     function shouldUseMissile(targetRow, targetCol, board, hasConfirmedHits, gameProgress) {
-        // Perfect for finishing off damaged ships
+        const coverageScore = calculateMissileCoverage(targetRow, targetCol, board);
+        console.log(`Missile evaluation at [${targetRow},${targetCol}]: coverage=${coverageScore}, hasHits=${hasConfirmedHits}, progress=${gameProgress.toFixed(2)}`);
+        
+        // Perfect for finishing off damaged ships - relaxed distance requirement
         if (hasConfirmedHits) {
-            const nearHit = isNearConfirmedHit(targetRow, targetCol, 1);
-            if (nearHit) {
-                const coverageScore = calculateMissileCoverage(targetRow, targetCol, board);
-                return coverageScore >= 3; // At least 3 unknown cells in plus pattern
+            const nearHit = isNearConfirmedHit(targetRow, targetCol, 2); // Increased from 1 to 2
+            if (nearHit && coverageScore >= 2) {
+                console.log(`Missile selected: Near confirmed hit with coverage ${coverageScore}`);
+                return true; // Reduced from 3 to 2 unknown cells
             }
         }
         
-        // Early game exploration with good coverage
-        if (gameProgress < 0.4) {
-            const coverageScore = calculateMissileCoverage(targetRow, targetCol, board);
-            return coverageScore >= 4; // Good coverage for exploration
+        // Early-mid game exploration with good coverage - extended game progress window
+        if (gameProgress < 0.6 && coverageScore >= 3) { // Increased from 0.4 to 0.6
+            console.log(`Missile selected: Early-mid game exploration with coverage ${coverageScore}`);
+            return true; // Reduced from 4 to 3 unknown cells
+        }
+        
+        // Mid-late game: use missiles for efficient area coverage
+        if (gameProgress >= 0.6 && coverageScore >= 4) {
+            console.log(`Missile selected: Late game area coverage with coverage ${coverageScore}`);
+            return true; // Use missiles when they can hit 4+ unknown cells
+        }
+        
+        // Question mark targeting: missiles are great for question marks
+        const centerCell = getCellByCoordinates(targetRow, targetCol);
+        if (centerCell && hasQuestionMark(centerCell) && coverageScore >= 2) {
+            console.log(`Missile selected: Question mark targeting with coverage ${coverageScore}`);
+            return true; // Use missile on question marks with decent coverage
+        }
+        
+        // High probability areas: use missiles in areas with good potential
+        if (coverageScore >= 4) {
+            console.log(`Missile selected: High coverage area with coverage ${coverageScore}`);
+            return true; // Always use missiles when they can cover 4+ unknown cells
         }
         
         return false;
