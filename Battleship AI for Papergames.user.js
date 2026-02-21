@@ -10,23 +10,23 @@
 // @license      MIT
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
     // Game state variables for probability calculations
     let confirmedHits = []; // Still needed for probability bonuses
     let visualizationEnabled = true; // Toggle for probability visualization
-    
+
     // Auto queue variables
     let isAutoQueueOn = false;
     let autoQueueToggleButton = null;
-    
+
     // Ship tracking system
     let remainingShips = [5, 4, 3, 3, 2]; // Standard Battleship ships: Carrier, Battleship, Cruiser, Submarine, Destroyer
     let sunkShips = [];
     let totalHitsOnBoard = 0;
     let totalSunkCells = 0;
-    
+
     // Weapon system variables
     let availableWeapons = {
         default: true,
@@ -39,28 +39,28 @@
     function detectAvailableWeapons() {
         const weaponButtons = document.querySelectorAll('.weapon-button');
         console.log(`Found ${weaponButtons.length} weapon buttons`);
-        
+
         availableWeapons = {
             default: true,
             missile: 0,
             fragmentBomb: 0,
             nuclearBomb: 0
         };
-        
+
         weaponButtons.forEach((button, index) => {
             const img = button.querySelector('img');
             const badge = button.querySelector('.badge');
             const isDisabled = button.hasAttribute('disabled');
-            
+
             console.log(`Button ${index}: img=${!!img}, badge=${!!badge}, disabled=${isDisabled}`);
-            
+
             if (img && badge) {
                 const weaponType = img.getAttribute('alt');
                 const count = parseInt(badge.textContent) || 0;
-                
+
                 console.log(`  Weapon type: ${weaponType}, count: ${count}, badge text: '${badge.textContent}'`);
-                
-                switch(weaponType) {
+
+                switch (weaponType) {
                     case 'missile':
                         availableWeapons.missile = isDisabled ? 0 : count;
                         console.log(`  Set missile count to: ${availableWeapons.missile}`);
@@ -79,22 +79,22 @@
                 console.log(`  Button ${index} missing img or badge`);
             }
         });
-        
+
         console.log('Final available weapons:', availableWeapons);
         return availableWeapons;
     }
-    
+
     // Strategic weapon selection system
     function selectOptimalWeapon(targetRow, targetCol, board, probabilityScores) {
         detectAvailableWeapons();
-        
+
         const gameProgress = (totalSunkCells + totalHitsOnBoard) / 17;
         const hasConfirmedHits = confirmedHits.length > 0;
-        
+
         console.log(`=== WEAPON SELECTION DEBUG ===`);
         console.log(`Target: [${targetRow},${targetCol}], Game Progress: ${gameProgress.toFixed(2)}, Has Hits: ${hasConfirmedHits}`);
         console.log(`Available weapons:`, availableWeapons);
-        
+
         // Nuclear bomb strategy - maximum area coverage
         if (availableWeapons.nuclearBomb > 0) {
             console.log(`Checking nuclear bomb...`);
@@ -103,7 +103,7 @@
                 return 'nuclear-bomb';
             }
         }
-        
+
         // Fragment bomb strategy - high probability clusters
         if (availableWeapons.fragmentBomb > 0) {
             console.log(`Checking fragment bomb...`);
@@ -112,11 +112,11 @@
                 return 'fragment-bomb';
             }
         }
-        
+
         // Missile strategy - confirmed hits and surrounding area
         if (availableWeapons.missile > 0) {
             console.log(`Checking missile (count: ${availableWeapons.missile})...`);
-            if (shouldUseMissile(targetRow, targetCol, board, hasConfirmedHits, gameProgress)) {
+            if (shouldUseMissile(targetRow, targetCol, board, hasConfirmedHits, probabilityScores)) {
                 console.log(`MISSILE SELECTED!`);
                 return 'missile';
             } else {
@@ -125,187 +125,109 @@
         } else {
             console.log(`No missiles available (count: ${availableWeapons.missile})`);
         }
-        
+
         // Default to single shot
         console.log(`Defaulting to single shot`);
         return 'default';
     }
-    
-    // Nuclear bomb strategy: 3x3 area with corners
-    function shouldUseNuclearBomb(targetRow, targetCol, board, probabilityScores, gameProgress) {
-        // Early game: use only for maximum coverage in completely unexplored areas
-        if (gameProgress < 0.2) {
-            const coverageScore = calculateNuclearCoverage(targetRow, targetCol, board);
-            return coverageScore >= 8; // At least 8 unknown cells in pattern (nearly full coverage)
-        }
-        
-        // Mid-late game: use only when extremely high probability cluster detected
-        if (gameProgress >= 0.2) {
-            const clusterScore = calculateClusterProbability(targetRow, targetCol, probabilityScores, 'nuclear');
-            return clusterScore >= 20; // Very high combined probability in nuclear pattern
-        }
-        
-        return false;
-    }
-    
-    // Fragment bomb strategy: 4 hits in cross pattern
-    function shouldUseFragmentBomb(targetRow, targetCol, board, probabilityScores, gameProgress) {
-        // Best for confirmed hits to clear surrounding area efficiently
-        if (confirmedHits.length > 0) {
-            const nearHit = isNearConfirmedHit(targetRow, targetCol, 1); // More precise targeting
-            if (nearHit) {
-                const coverageScore = calculateFragmentCoverage(targetRow, targetCol, board);
-                return coverageScore >= 4; // Require full coverage for efficiency
-            }
-        }
-        
-        // High probability cross pattern - more restrictive
-        const clusterScore = calculateClusterProbability(targetRow, targetCol, probabilityScores, 'fragment');
-        return clusterScore >= 16; // Higher threshold for probability-based usage
-    }
-    
-    // Missile strategy: 5 hits in plus pattern
-    function shouldUseMissile(targetRow, targetCol, board, hasConfirmedHits, gameProgress) {
-        const coverageScore = calculateMissileCoverage(targetRow, targetCol, board);
-        console.log(`Missile evaluation at [${targetRow},${targetCol}]: coverage=${coverageScore}, hasHits=${hasConfirmedHits}, progress=${gameProgress.toFixed(2)}`);
-        
-        // Perfect for finishing off damaged ships
-        if (hasConfirmedHits) {
-            const nearHit = isNearConfirmedHit(targetRow, targetCol, 1);
-            if (nearHit && coverageScore >= 3) {
-                console.log(`Missile selected: Near confirmed hit with coverage ${coverageScore}`);
-                return true; // Use missile near hits with good coverage
-            }
-        }
-        
-        // Early game exploration with excellent coverage
-        if (gameProgress < 0.4 && coverageScore >= 4) {
-            console.log(`Missile selected: Early game exploration with coverage ${coverageScore}`);
-            return true; // Use missiles for early exploration with full coverage
-        }
-        
-        // Question mark targeting: missiles are effective for question marks
-        const centerCell = getCellByCoordinates(targetRow, targetCol);
-        if (centerCell && hasQuestionMark(centerCell) && coverageScore >= 3) {
-            console.log(`Missile selected: Question mark targeting with coverage ${coverageScore}`);
-            return true; // Use missile on question marks with good coverage
-        }
-        
-        // High value areas: use missiles when they provide maximum benefit
-        if (coverageScore >= 5) {
-            console.log(`Missile selected: Maximum coverage area with coverage ${coverageScore}`);
-            return true; // Only use missiles when they can hit all 5 cells
-        }
-        
-        return false;
-    }
-    
-    // Helper functions for weapon coverage calculations
-    function calculateNuclearCoverage(row, col, board) {
-        // Nuclear bomb pattern: center + 4 adjacent + 4 corners
-        const positions = [
-            [row, col], // center
-            [row-1, col], [row+1, col], [row, col-1], [row, col+1], // adjacent
-            [row-1, col-1], [row-1, col+1], [row+1, col-1], [row+1, col+1] // corners
-        ];
-        
-        return positions.filter(([r, c]) => 
-            r >= 0 && r < 10 && c >= 0 && c < 10 && 
-            (board[r][c] === 'available' || board[r][c] === 'question')
-        ).length;
-    }
-    
-    function calculateFragmentCoverage(row, col, board) {
-        // Fragment bomb pattern: center + 3 bombs above
-        const positions = [
-            [row, col], // center
-            [row-1, col], [row-2, col], [row-3, col] // 3 above
-        ];
-        
-        return positions.filter(([r, c]) => 
-            r >= 0 && r < 10 && c >= 0 && c < 10 && 
-            (board[r][c] === 'available' || board[r][c] === 'question')
-        ).length;
-    }
-    
-    function calculateMissileCoverage(row, col, board) {
-        // Missile pattern: center + 4 adjacent (plus shape)
-        const positions = [
-            [row, col], // center
-            [row-1, col], [row+1, col], [row, col-1], [row, col+1] // adjacent
-        ];
-        
-        console.log(`=== MISSILE COVERAGE DEBUG at [${row},${col}] ===`);
-        positions.forEach(([r, c]) => {
-            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
-                console.log(`  Position [${r},${c}]: ${board[r][c]}`);
-            } else {
-                console.log(`  Position [${r},${c}]: out of bounds`);
-            }
-        });
-        
-        const validTargets = positions.filter(([r, c]) => 
-            r >= 0 && r < 10 && c >= 0 && c < 10 && 
-            (board[r][c] === 'available' || board[r][c] === 'question')
-        );
-        
-        console.log(`  Valid targets: ${validTargets.length}`);
-        return validTargets.length;
-    }
-    
-    function calculateClusterProbability(row, col, probabilityScores, weaponType) {
-        let positions = [];
-        
-        switch(weaponType) {
-            case 'nuclear':
-                positions = [
-                    [row, col], [row-1, col], [row+1, col], [row, col-1], [row, col+1],
-                    [row-1, col-1], [row-1, col+1], [row+1, col-1], [row+1, col+1]
+
+    // Evaluates the total PROBABILITY YIELD of a weapon fired at a specific coordinate
+    function evaluateWeaponYield(row, col, weaponType, probabilityScores) {
+        let pattern = [];
+
+        switch (weaponType) {
+            case 'nuclear-bomb':
+                // 3x3 square
+                pattern = [
+                    [row, col],
+                    [row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1],
+                    [row - 1, col - 1], [row - 1, col + 1], [row + 1, col - 1], [row + 1, col + 1]
                 ];
                 break;
-            case 'fragment':
-                positions = [[row, col], [row-1, col], [row-2, col], [row-3, col]];
+            case 'fragment-bomb':
+                // target + 3 directly above
+                pattern = [
+                    [row, col],
+                    [row - 1, col], [row - 2, col], [row - 3, col]
+                ];
                 break;
             case 'missile':
-                positions = [[row, col], [row-1, col], [row+1, col], [row, col-1], [row, col+1]];
+                // cross shape
+                pattern = [
+                    [row, col],
+                    [row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]
+                ];
                 break;
+            default:
+                return 0;
         }
-        
-        return positions.reduce((total, [r, c]) => {
-            if (r >= 0 && r < 10 && c >= 0 && c < 10 && probabilityScores[r] && probabilityScores[r][c]) {
-                return total + probabilityScores[r][c];
+
+        return pattern.reduce((sum, [r, c]) => {
+            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
+                return sum + (probabilityScores[r][c] || 0);
             }
-            return total;
+            return sum;
         }, 0);
     }
-    
-    function isNearConfirmedHit(row, col, maxDistance) {
-        return confirmedHits.some(hit => {
-            const distance = Math.abs(hit.row - row) + Math.abs(hit.col - col);
-            return distance <= maxDistance;
-        });
+
+    // Nuclear bomb strategy: 3x3 area with corners
+    function shouldUseNuclearBomb(targetRow, targetCol, board, probabilityScores, gameProgress) {
+        const yieldValue = evaluateWeaponYield(targetRow, targetCol, 'nuclear-bomb', probabilityScores);
+        const cellValue = probabilityScores[targetRow][targetCol] || 1;
+
+        // Use early game if an incredible quadrant density exists
+        if (gameProgress < 0.3) {
+            return yieldValue > 250;
+        }
+
+        // Mid-late game: Ensure the absolute yield is at least 3x better than a single-target strike
+        return yieldValue >= cellValue * 3.0 && yieldValue > 150;
     }
-    
+
+    // Fragment bomb strategy: 4 vertical hits
+    function shouldUseFragmentBomb(targetRow, targetCol, board, probabilityScores, gameProgress) {
+        const yieldValue = evaluateWeaponYield(targetRow, targetCol, 'fragment-bomb', probabilityScores);
+        const cellValue = probabilityScores[targetRow][targetCol] || 1;
+
+        // We want strict, surgically dense vertical probability arrays.
+        return yieldValue >= cellValue * 2.0 && yieldValue > 100;
+    }
+
+    // Missile strategy: 5 hits in plus pattern
+    function shouldUseMissile(targetRow, targetCol, board, hasConfirmedHits, probabilityScores) {
+        const yieldValue = evaluateWeaponYield(targetRow, targetCol, 'missile', probabilityScores);
+        const cellValue = probabilityScores[targetRow][targetCol] || 1;
+
+        if (hasConfirmedHits) {
+            // If hits are active on the board, we already use strict targeting overlay
+            // Require just a minor bump in yield to finish a ship faster.
+            return yieldValue >= cellValue * 1.2 && yieldValue > 25;
+        }
+
+        // Just >1.5x return is good enough for a missile to explore the board wildly
+        return yieldValue >= cellValue * 1.5 && yieldValue > 50;
+    }
+
     // Weapon execution system
     function selectAndUseWeapon(weaponType) {
         console.log(`=== WEAPON EXECUTION DEBUG ===`);
         console.log(`Attempting to select weapon: ${weaponType}`);
-        
+
         const weaponButtons = document.querySelectorAll('.weapon-button');
         console.log(`Found ${weaponButtons.length} weapon buttons for selection`);
-        
+
         let weaponFound = false;
         let weaponSelected = false;
-        
+
         weaponButtons.forEach((button, index) => {
             const img = button.querySelector('img');
             if (img) {
                 const currentWeapon = img.getAttribute('alt');
                 console.log(`Button ${index}: weapon type = ${currentWeapon}`);
-                
+
                 // Remove current selection
                 button.classList.remove('is-selected');
-                
+
                 // Select the desired weapon
                 if (currentWeapon === weaponType) {
                     weaponFound = true;
@@ -319,20 +241,20 @@
                 console.log(`Button ${index}: no img found`);
             }
         });
-        
+
         if (!weaponFound) {
             console.log(`ERROR: Weapon type '${weaponType}' not found in available buttons`);
         }
-        
+
         return weaponSelected;
     }
-    
+
     // Helper function to get cell coordinates
     function getCellCoordinates(cellElement) {
         // First try data attributes
         let row = parseInt(cellElement.getAttribute('data-row'));
         let col = parseInt(cellElement.getAttribute('data-col'));
-        
+
         // If data attributes don't exist, try class name pattern
         if (isNaN(row) || isNaN(col)) {
             const classNames = cellElement.className.match(/cell-(\d+)-(\d+)/);
@@ -348,10 +270,10 @@
                 }
             }
         }
-        
+
         return [row || 0, col || 0];
     }
-    
+
     // Enhanced function to analyze the current board state for probability calculations
     function analyzeBoardState() {
         const board = Array(10).fill().map(() => Array(10).fill('unknown'));
@@ -359,6 +281,7 @@
         let missCount = 0;
         let destroyedCount = 0;
         let availableCount = 0;
+        let newConfirmedHits = [];
 
         // Specifically analyze the opponent's board
         const opponentBoard = document.querySelector('.opponent app-battleship-board table');
@@ -370,31 +293,44 @@
         opponentBoard.querySelectorAll('td[class*="cell-"]').forEach(cell => {
             const [row, col] = cell.className.match(/\d+/g).map(Number);
 
+            // Check for destroyed ship FIRST
+            if (cell.querySelector('.magictime.opacityIn.ship-cell.circle-dark')) {
+                board[row][col] = 'destroyed';
+                destroyedCount++;
+            }
             // Check for previously tried cell (miss)
-            if (cell.querySelector('svg.intersection.no-hit')) {
+            else if (cell.querySelector('svg.intersection.no-hit') || cell.querySelector('.miss')) {
                 board[row][col] = 'miss';
                 missCount++;
             }
             // Check for hit
-            else if (cell.querySelector('.hit.fire')) {
+            else if (cell.querySelector('.hit.fire') || cell.querySelector('.hit.skull')) {
                 board[row][col] = 'hit';
                 hitCount++;
-            }
-            // Check for destroyed ship
-            else if (cell.querySelector('.magictime.opacityIn.ship-cell.circle-dark')) {
-                board[row][col] = 'destroyed';
-                destroyedCount++;
+                newConfirmedHits.push({ row, col });
             }
             // Normal untried cell
-            else if (cell.querySelector('svg.intersection:not(.no-hit)')) {
+            else if (cell.querySelector('svg.intersection:not(.no-hit)') || hasQuestionMark(cell)) {
                 board[row][col] = 'available';
                 availableCount++;
             }
         });
 
+        confirmedHits = newConfirmedHits;
+
+        // Reset game state if board is empty but we have internal history
+        if (hitCount === 0 && missCount === 0 && destroyedCount === 0 && (totalHitsOnBoard > 0 || totalSunkCells > 0 || sunkShips.length > 0)) {
+            console.log("Empty board detected. Resetting game state variables for new match.");
+            remainingShips = [5, 4, 3, 3, 2];
+            sunkShips = [];
+            totalHitsOnBoard = 0;
+            totalSunkCells = 0;
+            confirmedHits = [];
+        }
+
         // Log board analysis for debugging
         console.log(`Board Analysis - Hits: ${hitCount}, Misses: ${missCount}, Destroyed: ${destroyedCount}, Available: ${availableCount}`);
-        
+
         return board;
     }
 
@@ -415,33 +351,33 @@
             // Consider both regular untried cells and question mark cells
             const isRegularCell = cell.classList.contains('null') && cell.querySelector('svg.intersection:not(.no-hit)');
             const isQuestionMark = hasQuestionMark(cell);
-            
+
             if (isRegularCell || isQuestionMark) {
                 const [row, col] = cell.className.match(/\d+/g).map(Number);
                 let score = calculateProbabilityScore(row, col, board);
-                
+
                 if (isQuestionMark) {
                     questionMarkCount++;
                     console.log(`Question mark found at [${row},${col}] with score: ${score}`);
                 }
-                
+
                 cells.push({ cell, score, row, col, isQuestionMark });
             }
         });
 
         // Sort cells by probability score (highest first)
         const sortedCells = cells.sort((a, b) => b.score - a.score);
-        
+
         // Log top candidates for debugging
         console.log(`Found ${cells.length} available cells (${questionMarkCount} question marks)`);
         if (sortedCells.length > 0) {
             const topCells = sortedCells.slice(0, 3);
             console.log('Top 3 probability targets:', topCells.map(c => `[${c.row},${c.col}]:${c.score.toFixed(1)}${c.isQuestionMark ? '(?)' : ''}`).join(', '));
         }
-        
+
         // Update probability visualization
         updateProbabilityVisualization(board);
-        
+
         return sortedCells.map(item => item.cell);
     }
 
@@ -485,7 +421,7 @@
                 z-index: 1000;
                 font-family: monospace;
             `;
-            
+
             // Color code based on probability (green = high, yellow = medium, red = low)
             const intensity = maxScore > 0 ? score / maxScore : 0;
             if (intensity > 0.7) {
@@ -495,9 +431,9 @@
             } else {
                 overlay.style.background = 'rgba(150, 0, 0, 0.8)';
             }
-            
+
             overlay.textContent = score.toFixed(1);
-            
+
             // Position the overlay relative to the cell
             cell.style.position = 'relative';
             cell.appendChild(overlay);
@@ -508,12 +444,12 @@
 
     // Ship sizes in standard Battleship
     const SHIP_SIZES = [5, 4, 3, 3, 2]; // Carrier, Battleship, Cruiser, Submarine, Destroyer
-    
+
     // Function to update ship tracking based on board analysis
     function updateShipTracking(board) {
         let currentHits = 0;
         let currentSunk = 0;
-        
+
         // Count current hits and sunk cells
         for (let row = 0; row < 10; row++) {
             for (let col = 0; col < 10; col++) {
@@ -521,11 +457,11 @@
                 if (board[row][col] === 'destroyed') currentSunk++;
             }
         }
-        
+
         // If sunk cells increased, a ship was destroyed
         if (currentSunk > totalSunkCells) {
             const newSunkCells = currentSunk - totalSunkCells;
-            
+
             // Try to determine which ship was sunk based on size
             // Find the largest remaining ship that matches the sunk size
             for (let i = 0; i < remainingShips.length; i++) {
@@ -536,13 +472,13 @@
                     break;
                 }
             }
-            
+
             totalSunkCells = currentSunk;
             confirmedHits = []; // Clear hits when ship is sunk
         }
-        
+
         totalHitsOnBoard = currentHits;
-        
+
         return {
             remainingShips: remainingShips.slice(),
             sunkShips: sunkShips.slice(),
@@ -550,437 +486,223 @@
             totalSunk: currentSunk
         };
     }
-    
-    // Enhanced probability calculation based on ship placement possibilities and density
+
+    // Advanced PDF (Probability Density Function) calculation
     function calculateProbabilityScore(row, col, board) {
         let totalProbability = 0;
-        let densityBonus = 0;
-        
-        // Update ship tracking first
-        const shipInfo = updateShipTracking(board);
-        
+
+        // Target Mode is strictly when there are known, unsunk hits on the board.
+        const isTargetMode = confirmedHits.length > 0;
+
         // Only calculate probabilities for remaining ships
         remainingShips.forEach(shipSize => {
-            let shipPlacements = 0;
-            
-            // Check horizontal placements
+            // Check horizontal placements covering (row, col)
             for (let startCol = Math.max(0, col - shipSize + 1); startCol <= Math.min(9, col); startCol++) {
                 if (startCol + shipSize <= 10) {
-                    if (canPlaceShip(row, startCol, shipSize, 'horizontal', board)) {
-                        shipPlacements += 1;
-                    }
+                    const weight = evaluatePlacement(row, startCol, shipSize, 'horizontal', board, isTargetMode);
+                    totalProbability += weight;
                 }
             }
-            
-            // Check vertical placements
+
+            // Check vertical placements covering (row, col)
             for (let startRow = Math.max(0, row - shipSize + 1); startRow <= Math.min(9, row); startRow++) {
                 if (startRow + shipSize <= 10) {
-                    if (canPlaceShip(startRow, col, shipSize, 'vertical', board)) {
-                        shipPlacements += 1;
-                    }
-                }
-            }
-            
-            // Weight larger ships more heavily as they're harder to place
-        // Apply Bayesian inference - adjust probability based on game state
-        const bayesianWeight = calculateBayesianWeight(shipSize, shipPlacements, board);
-        totalProbability += shipPlacements * bayesianWeight;
-        });
-        
-        // Calculate density bonus - cells in areas with more possible ship placements
-        const surroundingPositions = [
-            [row-2, col], [row-1, col-1], [row-1, col], [row-1, col+1],
-            [row, col-2], [row, col-1], [row, col+1], [row, col+2],
-            [row+1, col-1], [row+1, col], [row+1, col+1], [row+2, col]
-        ];
-        
-        surroundingPositions.forEach(([r, c]) => {
-            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
-                if (board[r] && (board[r][c] === 'unknown' || board[r][c] === 'available')) {
-                    densityBonus += 0.5; // Small bonus for each available nearby cell
+                    const weight = evaluatePlacement(startRow, col, shipSize, 'vertical', board, isTargetMode);
+                    totalProbability += weight;
                 }
             }
         });
-        
-        // Bonus for cells adjacent to confirmed hits (but not already hit)
-        const adjacentCells = [
-            [row-1, col], [row+1, col], [row, col-1], [row, col+1]
-        ];
-        
-        let hitBonus = 0;
-        adjacentCells.forEach(([r, c]) => {
-            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
-                if (board[r] && board[r][c] === 'hit') {
-                    hitBonus += 100; // Very large bonus for adjacent cells
-                }
-            }
-        });
-        
-        // Add bonus for cells 2 away from hits (potential ship continuation)
-        const nearbyPositions = [
-            [row-2, col], [row+2, col], [row, col-2], [row, col+2]
-        ];
-        
-        nearbyPositions.forEach(([r, c]) => {
-            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
-                if (board[r] && board[r][c] === 'hit') {
-                    hitBonus += 20; // Smaller bonus for cells 2 away
-                }
-            }
-        });
-        
-        // Check if this cell has a question mark and add bonus score
-        const cell = getCellByCoordinates(row, col);
-        if (cell && hasQuestionMark(cell)) {
-            const qmValue = evaluateQuestionMarkValue(cell);
-            console.log(`Question mark detected at [${row},${col}] - qmValue: ${qmValue}, adding bonus: ${qmValue * 2 + 25}`);
-            totalProbability += qmValue * 2; // Double the question mark value
-            totalProbability += 25; // Additional base bonus for question marks to ensure higher priority
+
+        // If we are in Target Mode, we DO NOT care about hunt parity or guessing.
+        // We only care about cells that can actually sink the ship.
+        if (isTargetMode) {
+            return totalProbability;
         }
-        
-        // Add parity bonus for hunt mode (checkerboard pattern)
-        // This is most effective when no ships have been hit yet
-        if (totalHitsOnBoard === 0 && remainingShips.length === 5) {
-            // Use parity pattern - prefer cells where (row + col) % 2 === 0
-            // This ensures we hit every ship of size 2 or larger
-            if ((row + col) % 2 === 0) {
-                totalProbability += 10; // Significant bonus for parity cells
+
+        // Hunt Mode Optimization (Adaptive Parity)
+        // If a cell doesn't fit any ship, its probability is 0. If it does, enhance it conditionally.
+        if (totalProbability > 0) {
+            const smallestShip = remainingShips.length > 0 ? Math.min(...remainingShips) : 2;
+
+            // Check if cell matches the optimal parity for the smallest remaining ship
+            if ((row + col) % smallestShip === 0) {
+                totalProbability *= 2.0; // Huge bonus to strict parity cells
+            }
+
+            // Add slight bonus for center of board
+            const distFromCenter = Math.abs(row - 4.5) + Math.abs(col - 4.5);
+            totalProbability += (10 - distFromCenter); // +1 to +10 bonus
+
+            // Check if this cell has a question mark and add bonus score
+            const cell = getCellByCoordinates(row, col);
+            if (cell && hasQuestionMark(cell)) {
+                totalProbability += 100; // Large bonus for question marks to prioritize them in hunt
             }
         }
-        
-        // Endgame optimization - when few ships remain, be more aggressive
-        const endgameBonus = calculateEndgameBonus(row, col, board);
-        
-        return totalProbability + hitBonus + densityBonus + endgameBonus;
+
+        return totalProbability;
     }
-    
-    // Endgame optimization function
-    function calculateEndgameBonus(row, col, board) {
-        let bonus = 0;
-        const remainingShipCount = remainingShips.length;
-        const smallestShip = remainingShips.length > 0 ? Math.min(...remainingShips) : 2;
-        
-        // When only 1-2 ships remain, focus on isolated areas
-        if (remainingShipCount <= 2) {
-            // Check if this cell is in an isolated area (good for finding last ships)
-            let isolationScore = 0;
-            const checkRadius = 2;
-            
-            for (let r = row - checkRadius; r <= row + checkRadius; r++) {
-                for (let c = col - checkRadius; c <= col + checkRadius; c++) {
-                    if (r >= 0 && r < 10 && c >= 0 && c < 10 && board[r] && board[r][c]) {
-                        if (board[r][c] === 'available' || board[r][c] === 'unknown') {
-                            isolationScore++;
-                        }
-                    }
-                }
-            }
-            
-            // Prefer areas with more available cells (potential ship hiding spots)
-            bonus += isolationScore * 2;
-        }
-        
-        // When only the smallest ships remain, use different parity
-        if (remainingShipCount <= 3 && smallestShip === 2) {
-            // For destroyer hunting, any parity works, but prefer corners and edges
-            if (row === 0 || row === 9 || col === 0 || col === 9) {
-                bonus += 5; // Edge bonus
-            }
-            if ((row === 0 || row === 9) && (col === 0 || col === 9)) {
-                bonus += 3; // Corner bonus
-            }
-        }
-        
-        // When many ships are sunk, increase aggression in unexplored areas
-        if (sunkShips.length >= 3) {
-            // Count nearby misses - avoid areas with many misses
-            let nearbyMisses = 0;
-            for (let r = row - 1; r <= row + 1; r++) {
-                for (let c = col - 1; c <= col + 1; c++) {
-                    if (r >= 0 && r < 10 && c >= 0 && c < 10 && board[r] && board[r][c] === 'miss') {
-                        nearbyMisses++;
-                    }
-                }
-            }
-            
-            // Penalize cells near many misses
-            bonus -= nearbyMisses * 3;
-        }
-        
-        return bonus;
-    }
-    
-    // Bayesian inference for probability weighting
-    function calculateBayesianWeight(shipSize, shipPlacements, board) {
-        let baseWeight = shipSize / 3; // Original weighting
-        
-        // Prior probability adjustments based on ship size
-        const shipSizeMultiplier = {
-            5: 1.5, // Carrier is hardest to place
-            4: 1.3, // Battleship
-            3: 1.1, // Cruiser/Submarine
-            2: 0.9  // Destroyer is easiest to place
-        };
-        
-        baseWeight *= (shipSizeMultiplier[shipSize] || 1.0);
-        
-        // Likelihood adjustments based on current board state
-        const gameProgress = (totalSunkCells + totalHitsOnBoard) / 17; // Total ship cells = 17
-        
-        // Early game: prefer larger ships (they're more likely to be hit first)
-        if (gameProgress < 0.3) {
-            if (shipSize >= 4) {
-                baseWeight *= 1.2;
-            }
-        }
-        // Mid game: balanced approach
-        else if (gameProgress < 0.7) {
-            baseWeight *= 1.0; // No adjustment
-        }
-        // Late game: focus on remaining ships
-        else {
-            // If this is one of the few remaining ships, increase its weight
-            if (remainingShips.includes(shipSize)) {
-                const rarityBonus = 5.0 / remainingShips.length; // More rare = higher weight
-                baseWeight *= (1.0 + rarityBonus);
-            }
-        }
-        
-        // Posterior probability: adjust based on observed hit patterns
-        if (totalHitsOnBoard > 0) {
-            // If we have hits, ships near hits are more likely
-            // This is handled in the hit bonus, but we can adjust the base weight too
-            if (shipPlacements > 0) {
-                baseWeight *= 1.1; // Small bonus for ships that can be placed
-            }
-        }
-        
-        // Constraint satisfaction: heavily penalize impossible placements
-        if (shipPlacements === 0) {
-            return 0; // Impossible placement
-        }
-        
-        return baseWeight;
-    }
-    
-    // Enhanced function to check if a ship can be placed at a specific position with pattern recognition
-    function canPlaceShip(startRow, startCol, shipSize, orientation, board) {
-        // First check basic placement validity
+
+    // Evaluates a specific ship placement and returns its probability weight
+    function evaluatePlacement(startRow, startCol, shipSize, orientation, board, isTargetMode) {
+        let coversSunk = false;
+        let coversMiss = false;
+        let overlappedHits = 0;
+
         for (let i = 0; i < shipSize; i++) {
-            const checkRow = orientation === 'vertical' ? startRow + i : startRow;
-            const checkCol = orientation === 'horizontal' ? startCol + i : startCol;
-            
-            // Check bounds
-            if (checkRow < 0 || checkRow >= 10 || checkCol < 0 || checkCol >= 10) {
-                return false;
-            }
-            
-            // Check if cell is already hit, missed, or destroyed
-            if (board[checkRow] && (board[checkRow][checkCol] === 'miss' || board[checkRow][checkCol] === 'destroyed')) {
-                return false;
-            }
+            const r = orientation === 'vertical' ? startRow + i : startRow;
+            const c = orientation === 'horizontal' ? startCol + i : startCol;
+
+            const cellState = board[r][c];
+            if (cellState === 'miss') coversMiss = true;
+            if (cellState === 'destroyed') coversSunk = true;
+            if (cellState === 'hit') overlappedHits++;
         }
-        
-        // Advanced pattern recognition: Check ship spacing constraints
-        // Most Battleship variants don't allow ships to touch each other
+
+        // Invalid placements: overlaps misses or destroyed ships
+        if (coversMiss || coversSunk) return 0;
+
+        // Strict Spacing Rules: check surrounding cells for destroyed ships
+        // Ships are not allowed to be adjacent (including diagonally) to confirmed sunken ships
         for (let i = 0; i < shipSize; i++) {
-            const shipRow = orientation === 'vertical' ? startRow + i : startRow;
-            const shipCol = orientation === 'horizontal' ? startCol + i : startCol;
-            
-            // Check all 8 adjacent cells for destroyed ships (diagonal touching rule)
+            const r = orientation === 'vertical' ? startRow + i : startRow;
+            const c = orientation === 'horizontal' ? startCol + i : startCol;
+
+            // Check all 8 adjacent cells for destroyed ships
             const adjacentPositions = [
-                [shipRow-1, shipCol-1], [shipRow-1, shipCol], [shipRow-1, shipCol+1],
-                [shipRow, shipCol-1],                          [shipRow, shipCol+1],
-                [shipRow+1, shipCol-1], [shipRow+1, shipCol], [shipRow+1, shipCol+1]
+                [r - 1, c - 1], [r - 1, c], [r - 1, c + 1],
+                [r, c - 1], [r, c + 1],
+                [r + 1, c - 1], [r + 1, c], [r + 1, c + 1]
             ];
-            
-            for (const [adjRow, adjCol] of adjacentPositions) {
-                if (adjRow >= 0 && adjRow < 10 && adjCol >= 0 && adjCol < 10) {
-                    if (board[adjRow] && board[adjRow][adjCol] === 'destroyed') {
-                        // Check if this destroyed cell could be part of our current ship
-                        let isPartOfCurrentShip = false;
-                        for (let j = 0; j < shipSize; j++) {
-                            const currentShipRow = orientation === 'vertical' ? startRow + j : startRow;
-                            const currentShipCol = orientation === 'horizontal' ? startCol + j : startCol;
-                            if (adjRow === currentShipRow && adjCol === currentShipCol) {
-                                isPartOfCurrentShip = true;
-                                break;
-                            }
-                        }
-                        
-                        // If it's not part of our ship, this placement violates spacing rules
-                        if (!isPartOfCurrentShip) {
-                            return false;
+
+            for (const [adjR, adjC] of adjacentPositions) {
+                if (adjR >= 0 && adjR < 10 && adjC >= 0 && adjC < 10) {
+                    if (board[adjR][adjC] === 'destroyed') {
+                        // Exclude placement if it's adjacent to a destroyed ship
+                        return 0;
+                    }
+                }
+            }
+        }
+
+        // Target Mode Logic
+        if (isTargetMode) {
+            // In Target Mode, a placement MUST cover at least one confirmed hit to be considered.
+            if (overlappedHits === 0) return 0;
+
+            // Exponential scaling: Placements that overlap multiple hits are exponentially more likely.
+            return Math.pow(10, overlappedHits);
+        }
+
+        // Hunt Mode Logic
+        // In hunt mode, we expect 0 overlapped hits unless the board is inconsistent.
+        return 1;
+    }
+
+
+
+    // Removed outdated handleAttackResult logic
+
+    // Function to get adjacent cells with optional radius for probability calculations
+    function getAdjacentCells(cell, radius = 1) {
+        const [row, col] = getCellCoordinates(cell);
+        let adjacentCells = [];
+
+        if (radius === 1) {
+            // Standard adjacent cells (up, down, left, right)
+            adjacentCells.push(
+                getCellByCoordinates(row - 1, col),
+                getCellByCoordinates(row + 1, col),
+                getCellByCoordinates(row, col - 1),
+                getCellByCoordinates(row, col + 1)
+            );
+        } else {
+            // For larger radius, get all cells within the specified distance
+            for (let dRow = -radius; dRow <= radius; dRow++) {
+                for (let dCol = -radius; dCol <= radius; dCol++) {
+                    if (dRow === 0 && dCol === 0) continue; // Skip the center cell
+
+                    const newRow = row + dRow;
+                    const newCol = col + dCol;
+
+                    // Check if the new position is within bounds
+                    if (newRow >= 0 && newRow < 10 && newCol >= 0 && newCol < 10) {
+                        const adjacentCell = getCellByCoordinates(newRow, newCol);
+                        if (adjacentCell) {
+                            adjacentCells.push(adjacentCell);
                         }
                     }
                 }
             }
         }
-        
-        // Check for consistency with existing hits
-        // If there are hits that should be part of this ship, ensure they align
-        let hitsInShip = 0;
-        for (let i = 0; i < shipSize; i++) {
-            const checkRow = orientation === 'vertical' ? startRow + i : startRow;
-            const checkCol = orientation === 'horizontal' ? startCol + i : startCol;
-            
-            if (board[checkRow] && board[checkRow][checkCol] === 'hit') {
-                hitsInShip++;
+
+        // Filter out null cells and already attacked cells, but include question marks
+        return adjacentCells.filter(cell => {
+            if (!cell) return false;
+
+            // Include question mark cells as valid targets
+            if (hasQuestionMark(cell)) {
+                return true;
+            }
+
+            // Include regular null cells that haven't been attacked
+            return cell.classList.contains('null') && cell.querySelector('svg.intersection:not(.no-hit)');
+        });
+    }
+
+    // Function to determine orientation based on confirmed hits
+    function determineOrientation(hitsToCheck) {
+        // If no hits are provided, use the confirmed hits
+        if (!hitsToCheck) {
+            hitsToCheck = confirmedHits.slice();
+        }
+
+        // Need at least 2 hits to determine orientation
+        if (!hitsToCheck || hitsToCheck.length < 2) {
+            console.log('Not enough hits to determine orientation');
+            return null;
+        }
+
+        // Create copies of the arrays to avoid modifying the original
+        const sortedByRow = [...hitsToCheck].sort((a, b) => a.row - b.row);
+        const sortedByCol = [...hitsToCheck].sort((a, b) => a.col - b.col);
+
+        // Check if all hits are in the same column (vertical orientation)
+        let sameColumn = true;
+        for (let i = 1; i < sortedByCol.length; i++) {
+            if (sortedByCol[i].col !== sortedByCol[0].col) {
+                sameColumn = false;
+                break;
             }
         }
-        
-        // If this ship placement would include hits, it's more likely to be correct
-        // This is handled in the probability calculation as a bonus
-        
-        return true;
-    }
 
-
-
-// Simplified handleAttackResult for probability-based system
-function handleAttackResult(cell) {
-    // Extract row and column from cell class name
-    const [row, col] = getCellCoordinates(cell);
-
-    // Check if this was a question mark that got resolved
-    const wasQuestionMark = hasQuestionMark(cell);
-    
-    // Check for hit (including fire hit and skull hit)
-    if (cell.querySelector('.hit.fire') || isHitWithSkull(cell)) {
-        const hitCoord = {
-            row: row,
-            col: col
-        };
-        confirmedHits.push(hitCoord);
-        console.log('Confirmed hit at:', hitCoord);
-        
-        if (wasQuestionMark) {
-            console.log(`Question mark at [${row},${col}] resolved to HIT`);
-        }
-    } 
-    // Check for miss (including no-hit intersection)
-    else if (cell.querySelector('.miss') || cell.querySelector('svg.intersection.no-hit')) {
-        console.log('Miss on cell:', getCellCoordinates(cell));
-        
-        if (wasQuestionMark) {
-            console.log(`Question mark at [${row},${col}] resolved to MISS`);
-        }
-    }
-    // If it's still a question mark after clicking, log this for debugging
-    else if (wasQuestionMark) {
-        console.log(`Question mark at [${row},${col}] was clicked but still appears as question mark`);
-    }
-
-    // Check if ship was sunk and clear hits if so
-    if (cell.querySelector('.magictime.opacityIn.ship-cell.circle-dark')) {
-        console.log('Ship sunk! Removing sunk ship hits from confirmed hits.');
-        confirmedHits = [];
-    }
-}
-
-// Function to get adjacent cells with optional radius for probability calculations
-function getAdjacentCells(cell, radius = 1) {
-    const [row, col] = getCellCoordinates(cell);
-    let adjacentCells = [];
-
-    if (radius === 1) {
-        // Standard adjacent cells (up, down, left, right)
-        adjacentCells.push(
-            getCellByCoordinates(row-1, col),
-            getCellByCoordinates(row+1, col),
-            getCellByCoordinates(row, col-1),
-            getCellByCoordinates(row, col+1)
-        );
-    } else {
-        // For larger radius, get all cells within the specified distance
-        for (let dRow = -radius; dRow <= radius; dRow++) {
-            for (let dCol = -radius; dCol <= radius; dCol++) {
-                if (dRow === 0 && dCol === 0) continue; // Skip the center cell
-                
-                const newRow = row + dRow;
-                const newCol = col + dCol;
-
-                // Check if the new position is within bounds
-                if (newRow >= 0 && newRow < 10 && newCol >= 0 && newCol < 10) {
-                    const adjacentCell = getCellByCoordinates(newRow, newCol);
-                    if (adjacentCell) {
-                        adjacentCells.push(adjacentCell);
-                    }
-                }
+        // Check if all hits are in the same row (horizontal orientation)
+        let sameRow = true;
+        for (let i = 1; i < sortedByRow.length; i++) {
+            if (sortedByRow[i].row !== sortedByRow[0].row) {
+                sameRow = false;
+                break;
             }
         }
-    }
 
-    // Filter out null cells and already attacked cells, but include question marks
-    return adjacentCells.filter(cell => {
-        if (!cell) return false;
-        
-        // Include question mark cells as valid targets
-        if (hasQuestionMark(cell)) {
-            return true;
+        if (sameColumn) {
+            console.log('Determined vertical orientation');
+            return 'vertical';
         }
-        
-        // Include regular null cells that haven't been attacked
-        return cell.classList.contains('null') && cell.querySelector('svg.intersection:not(.no-hit)');
-    });
-}
+        if (sameRow) {
+            console.log('Determined horizontal orientation');
+            return 'horizontal';
+        }
 
-// Function to determine orientation based on confirmed hits
-function determineOrientation(hitsToCheck) {
-    // If no hits are provided, use the confirmed hits
-    if (!hitsToCheck) {
-        hitsToCheck = confirmedHits.slice();
-    }
-
-    // Need at least 2 hits to determine orientation
-    if (!hitsToCheck || hitsToCheck.length < 2) {
-        console.log('Not enough hits to determine orientation');
+        console.log('Could not determine orientation');
         return null;
     }
 
-    // Create copies of the arrays to avoid modifying the original
-    const sortedByRow = [...hitsToCheck].sort((a, b) => a.row - b.row);
-    const sortedByCol = [...hitsToCheck].sort((a, b) => a.col - b.col);
-
-    // Check if all hits are in the same column (vertical orientation)
-    let sameColumn = true;
-    for (let i = 1; i < sortedByCol.length; i++) {
-        if (sortedByCol[i].col !== sortedByCol[0].col) {
-            sameColumn = false;
-            break;
-        }
-    }
-
-    // Check if all hits are in the same row (horizontal orientation)
-    let sameRow = true;
-    for (let i = 1; i < sortedByRow.length; i++) {
-        if (sortedByRow[i].row !== sortedByRow[0].row) {
-            sameRow = false;
-            break;
-        }
-    }
-
-    if (sameColumn) {
-        console.log('Determined vertical orientation');
-        return 'vertical';
-    }
-    if (sameRow) {
-        console.log('Determined horizontal orientation');
-        return 'horizontal';
-    }
-
-    console.log('Could not determine orientation');
-    return null;
-}
-
-    // Function to simulate a click on a cell and handle results
+    // Function to simulate a click on a cell
     function attackCell(cell) {
         if (cell) {
             cell.click();  // Simulate clicking the cell
             console.log('Attacked cell:', cell);
-            
-            // After attack, check if it was a hit
-            setTimeout(() => handleAttackResult(cell), 1000);  // Slight delay to allow DOM to update
         }
     }
 
@@ -997,21 +719,21 @@ function determineOrientation(hitsToCheck) {
         const isHit = cell.querySelector('.hit.fire') || cell.querySelector('.hit.skull');
         const isMiss = cell.querySelector('.miss') || cell.querySelector('svg.intersection.no-hit');
         const isDestroyed = cell.querySelector('.magictime.opacityIn.ship-cell.circle-dark');
-        
+
         // If the cell has been resolved, it's no longer a question mark
         if (isHit || isMiss || isDestroyed) {
             return false;
         }
-        
+
         const hasGift = cell.querySelector('.gift.animated.tin-in') !== null;
         const hasGiftTaken = cell.querySelector('.gift-taken') !== null;
         const result = hasGift || hasGiftTaken;
-        
+
         if (result) {
             const [row, col] = getCellCoordinates(cell);
             console.log(`Question mark found at [${row},${col}] - hasGift: ${hasGift}, hasGiftTaken: ${hasGiftTaken}`);
         }
-        
+
         return result;
     }
 
@@ -1090,8 +812,8 @@ function determineOrientation(hitsToCheck) {
     function getSurroundingCells(row, col) {
         const directions = [
             [-1, -1], [-1, 0], [-1, 1],
-            [0, -1],           [0, 1],
-            [1, -1],  [1, 0],  [1, 1]
+            [0, -1], [0, 1],
+            [1, -1], [1, 0], [1, 1]
         ];
 
         return directions.map(([dx, dy]) => {
@@ -1109,7 +831,7 @@ function determineOrientation(hitsToCheck) {
         // Find the opponent board first
         const opponentBoard = document.querySelector('.opponent app-battleship-board table');
         if (!opponentBoard) return null;
-        
+
         // Search through all cells to find the one with matching coordinates
         const cells = opponentBoard.querySelectorAll('td[class*="cell-"]');
         for (const cell of cells) {
@@ -1122,177 +844,182 @@ function determineOrientation(hitsToCheck) {
     }
 
     // Function to check if the game is in a ready state for an attack
-    function isGameReady() {
-        let opponentBoard = document.querySelector('.opponent app-battleship-board table');  // Opponent's board ID
-        return opponentBoard && !opponentBoard.classList.contains('inactive'); // Adjust the class as per game state
+    function isGameReady(username) {
+        let opponentBoard = document.querySelector('.opponent app-battleship-board table');
+        if (!opponentBoard) return false;
+
+        // Verify it is actually our turn by checking if chronometer is on our profile
+        const profileOpener = [...document.querySelectorAll(".text-truncate.cursor-pointer")].find(
+            opener => opener.textContent.trim() === username
+        );
+
+        if (profileOpener) {
+            const playerContainer = profileOpener.parentNode;
+            if (playerContainer) {
+                // Check if the visual chronometer is present
+                if (playerContainer.querySelector('app-chronometer')) {
+                    return true;
+                }
+
+                // Fallback: check if the timer span contains a valid countdown
+                const spans = playerContainer.querySelectorAll("span");
+                for (let i = 0; i < spans.length; i++) {
+                    const text = spans[i].textContent.trim();
+                    if (/^\d+$/.test(text)) {
+                        return true; // We found the ticking seconds!
+                    }
+                }
+            }
+        }
+
+        // Let's also check if opponent board has inactive class just in case UI changed
+        return !opponentBoard.classList.contains('inactive') && !opponentBoard.closest('.inactive');
     }
 
-// Function to introduce a delay in milliseconds
-function waitForAttack(delay) {
-    return new Promise(resolve => setTimeout(resolve, delay));
-}
 
-
-// Adjusted performAttack to add a 2-second delay and check board state
-async function performAttack(currentElementValue) {
-    const now = Date.now();
-
-    // Check if enough time has passed since the last attack (2 seconds)
-    if (now - lastAttackTime < 2000) {
-        console.log("Waiting for 2 seconds before the next attack.");
-        return;
-    }
-
-    // Only perform an attack if the game is ready
-    if (!isGameReady()) {
-        console.log("Game is not ready. Waiting...");
-        return;
-    }
-
-    console.log('Performing attack based on current element value:', currentElementValue);
-
-    // Wait 2 seconds before the next attack
-    await waitForAttack(2000);
-
-    // Select cell to attack based on hunt or target mode
-    let cell = huntMode ? huntModeAttack() : targetModeAttack();
-    if (cell) {
-        attackCell(cell);
-        lastAttackTime = now; // Update the last attack time
-    } else {
-        console.log("No cell available to attack.");
-    }
-}
-
-
-    GM.getValue('username').then(function(username) {
+    GM.getValue('username').then(function (username) {
         if (!username) {
             username = prompt('Please enter your Papergames username:');
             GM.setValue('username', username);
         }
     });
 
-// Simplified probability-based attack system
-function updateBoard() {
-    console.log("=== AI Turn Started ===");
-    
-    // Update probability visualization first
-    const board = analyzeBoardState();
-    updateProbabilityVisualization(board);
-    
-    GM.getValue("username").then(function(username) {
-        var profileOpener = [...document.querySelectorAll(".text-truncate.cursor-pointer")].find(
-            opener => opener.textContent.trim() === username
-        );
+    // Simplified probability-based attack system
+    function updateBoard() {
+        console.log("=== AI Turn Started ===");
 
-        var chronometer = document.querySelector("app-chronometer");
-        var numberElement = profileOpener.parentNode ? profileOpener.parentNode.querySelectorAll("span")[4] : null;
+        // Update probability visualization first
+        const board = analyzeBoardState();
+        updateProbabilityVisualization(board);
 
-        var currentElement = chronometer || numberElement;
-        console.log("Current Element:", currentElement);
+        GM.getValue("username").then(function (username) {
+            var profileOpener = [...document.querySelectorAll(".text-truncate.cursor-pointer")].find(
+                opener => opener.textContent.trim() === username
+            );
 
-        // Check for error message first
-        checkForErrorAndRefresh();
+            var chronometer = document.querySelector("app-chronometer");
+            var numberElement = profileOpener.parentNode ? profileOpener.parentNode.querySelectorAll("span")[4] : null;
 
-        // Use pure probability-based targeting
-        const bestCell = findBestProbabilityCell();
-        if (bestCell) {
-            console.log("Selected optimal cell based on probability calculations");
-            
-            // Get cell coordinates for weapon selection
-            const [row, col] = getCellCoordinates(bestCell);
-            
-            // Build probability scores matrix for weapon selection
-            const probabilityScores = {};
-            for (let r = 0; r < 10; r++) {
-                probabilityScores[r] = {};
-                for (let c = 0; c < 10; c++) {
-                    probabilityScores[r][c] = calculateProbabilityScore(r, c, board);
+            var currentElement = chronometer || numberElement;
+            console.log("Current Element:", currentElement);
+
+            // Check for error message first
+            checkForErrorAndRefresh();
+
+            // Use pure probability-based targeting
+            if (isGameReady(username)) {
+                updateShipTracking(board);
+                const bestCell = findBestProbabilityCell();
+                if (bestCell) {
+                    console.log("Selected optimal cell based on probability calculations");
+
+                    // Get cell coordinates for weapon selection
+                    const [row, col] = getCellCoordinates(bestCell);
+
+                    // Build probability scores matrix for weapon selection
+                    const probabilityScores = {};
+                    for (let r = 0; r < 10; r++) {
+                        probabilityScores[r] = {};
+                        for (let c = 0; c < 10; c++) {
+                            probabilityScores[r][c] = calculateProbabilityScore(r, c, board);
+                        }
+                    }
+
+                    // Select optimal weapon before attacking
+                    const optimalWeapon = selectOptimalWeapon(row, col, board, probabilityScores);
+                    console.log(`Using weapon: ${optimalWeapon}`);
+
+                    // Select and use the optimal weapon
+                    selectAndUseWeapon(optimalWeapon);
+
+                    // Small delay to ensure weapon selection is processed
+                    setTimeout(() => {
+                        attackCell(bestCell);
+                    }, 100);
+                } else {
+                    // Fallback if no cells available based on probability, try random
+                    const availableCells = getAvailableCells();
+                    if (availableCells.length > 0) {
+                        console.log("Fallback: attacking random cell.");
+                        attackCell(availableCells[Math.floor(Math.random() * availableCells.length)]);
+                    } else {
+                        console.log("No valid cells found to attack at all!");
+                    }
+                }
+            } else {
+                // Not our turn, do nothing.
+                // Turn validation ensures no async attacks trigger 'The targeted frame is already played'
+            }
+        });
+    }
+
+    // Manual function to refresh probability visualization
+    function refreshProbabilityVisualization() {
+        const board = analyzeBoardState();
+        updateProbabilityVisualization(board);
+        console.log("Probability visualization manually refreshed");
+    }
+
+    // Expose functions to global scope for manual triggering
+    window.refreshProbabilityVisualization = refreshProbabilityVisualization;
+    window.toggleProbabilityVisualization = function () {
+        visualizationEnabled = !visualizationEnabled;
+        if (visualizationEnabled) {
+            console.log('Probability visualization enabled');
+            refreshProbabilityVisualization();
+        } else {
+            console.log('Probability visualization disabled');
+            // Remove all existing overlays
+            const overlays = document.querySelectorAll('.probability-overlay');
+            overlays.forEach(overlay => overlay.remove());
+        }
+        return visualizationEnabled;
+    };
+
+    // Function to find the cell with the highest probability score
+    function findBestProbabilityCell() {
+        const board = analyzeBoardState();
+        const opponentBoard = document.querySelector('.opponent app-battleship-board table');
+        if (!opponentBoard) {
+            console.log('Cannot find opponent board');
+            return null;
+        }
+
+        let bestCell = null;
+        let bestScore = -1;
+
+        opponentBoard.querySelectorAll('td[class*="cell-"]').forEach(cell => {
+            // Only consider cells that haven't been attacked
+            if (cell.classList.contains('null') && cell.querySelector('svg.intersection:not(.no-hit)') || hasQuestionMark(cell)) {
+                const [row, col] = getCellCoordinates(cell);
+                const score = calculateProbabilityScore(row, col, board);
+
+                // console.log(`Cell [${row},${col}] probability score: ${score}`);
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestCell = cell;
                 }
             }
-            
-            // Select optimal weapon before attacking
-            const optimalWeapon = selectOptimalWeapon(row, col, board, probabilityScores);
-            console.log(`Using weapon: ${optimalWeapon}`);
-            
-            // Select and use the optimal weapon
-            selectAndUseWeapon(optimalWeapon);
-            
-            // Small delay to ensure weapon selection is processed
-            setTimeout(() => {
-                attackCell(bestCell);
-            }, 100);
-            return;
-        }
+        });
 
-        // Fallback if no cells available
-        console.log("No valid cells found to attack!");
-        performAttack(currentElement.textContent);
-    });
-}
-
-// Manual function to refresh probability visualization
-function refreshProbabilityVisualization() {
-    const board = analyzeBoardState();
-    updateProbabilityVisualization(board);
-    console.log("Probability visualization manually refreshed");
-}
-
-// Expose functions to global scope for manual triggering
-window.refreshProbabilityVisualization = refreshProbabilityVisualization;
-window.toggleProbabilityVisualization = function() {
-    visualizationEnabled = !visualizationEnabled;
-    if (visualizationEnabled) {
-        console.log('Probability visualization enabled');
-        refreshProbabilityVisualization();
-    } else {
-        console.log('Probability visualization disabled');
-        // Remove all existing overlays
-        const overlays = document.querySelectorAll('.probability-overlay');
-        overlays.forEach(overlay => overlay.remove());
-    }
-    return visualizationEnabled;
-};
-
-// Function to find the cell with the highest probability score
-function findBestProbabilityCell() {
-    const board = analyzeBoardState();
-    const opponentBoard = document.querySelector('.opponent app-battleship-board table');
-    if (!opponentBoard) {
-        console.log('Cannot find opponent board');
-        return null;
+        console.log(`Best cell found with score: ${bestScore}`);
+        return bestCell;
     }
 
-    let bestCell = null;
-    let bestScore = -1;
-
-    opponentBoard.querySelectorAll('td[class*="cell-"]').forEach(cell => {
-        // Only consider cells that haven't been attacked
-        if (cell.classList.contains('null') && cell.querySelector('svg.intersection:not(.no-hit)') || hasQuestionMark(cell)) {
-            const [row, col] = getCellCoordinates(cell);
-            const score = calculateProbabilityScore(row, col, board);
-            
-            // console.log(`Cell [${row},${col}] probability score: ${score}`);
-            
-            if (score > bestScore) {
-                bestScore = score;
-                bestCell = cell;
+    // Function to check for error message and refresh if needed
+    function checkForErrorAndRefresh() {
+        const errorToast = document.querySelector('.toast-error .toast-message');
+        if (errorToast) {
+            const errorText = errorToast.textContent || "";
+            if (errorText.includes('The targeted frame is already played') ||
+                errorText.includes('Not enough shoots for this weapon')) {
+                console.log("Desync error detected, reloading page...");
+                location.reload();
             }
         }
-    });
-
-    console.log(`Best cell found with score: ${bestScore}`);
-    return bestCell;
-}
-
-// Function to check for error message and refresh if needed
-function checkForErrorAndRefresh() {
-    const errorToast = document.querySelector('.toast-error .toast-message');
-    if (errorToast && errorToast.textContent.includes('The targeted frame is already played')) {
-        location.reload();
     }
-}
-// Legacy functions removed - now using pure probability-based targeting
+    // Legacy functions removed - now using pure probability-based targeting
 
 
 
@@ -1310,24 +1037,35 @@ function checkForErrorAndRefresh() {
     }
 
     function clickLeaveRoomButton() {
-        var leaveRoomButton = document.querySelector('span.front.text.btn.btn-light');
-        if (leaveRoomButton && leaveRoomButton.textContent.includes('Leave room')) {
-            leaveRoomButton.click();
+        if (!isGameReady("dummy")) { // Avoid clicking 'Leave room' during active gameplay on our turn
+            var buttons = document.querySelectorAll('span.front.text.btn.btn-light');
+            for (let btn of buttons) {
+                if (btn.textContent.trim() === 'Leave room') {
+                    btn.click();
+                    break;
+                }
+            }
         }
     }
 
     function clickPlayOnlineButton() {
-        var playOnlineButton = document.querySelector('span.front.text.btn.btn-secondary.btn-lg.text-start.juicy-btn-inner');
-        if (playOnlineButton) {
-            playOnlineButton.click();
+        var buttons = document.querySelectorAll('span.front.text.btn.btn-secondary.btn-lg.text-start.juicy-btn-inner');
+        for (let btn of buttons) {
+            if (btn.textContent.includes('Play')) {
+                btn.click();
+                break;
+            }
         }
     }
 
     // Periodically check for buttons when the toggle is on
     function checkButtonsPeriodically() {
         if (isAutoQueueOn) {
-            clickLeaveRoomButton();
             clickPlayOnlineButton();
+            // Leave room should only be clicked if the game is over
+            const errorToast = document.querySelector('.toast-error .toast-message');
+            const matchEnded = document.querySelector('.game-over-container'); // Look for generic game over indicators if possible
+            clickLeaveRoomButton();
         }
     }
 
@@ -1335,7 +1073,7 @@ function checkForErrorAndRefresh() {
     function createToggleButton() {
         // Check if buttons already exist
         if (document.getElementById('probability-toggle')) return;
-        
+
         // Probability toggle button
         const probButton = document.createElement('button');
         probButton.id = 'probability-toggle';
@@ -1355,13 +1093,13 @@ function checkForErrorAndRefresh() {
             font-weight: bold;
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         `;
-        
-        probButton.addEventListener('click', function() {
+
+        probButton.addEventListener('click', function () {
             const enabled = window.toggleProbabilityVisualization();
             probButton.style.background = enabled ? '#4CAF50' : '#f44336';
             probButton.textContent = enabled ? 'Hide Probability View' : 'Show Probability View';
         });
-        
+
         // Auto queue toggle button
         autoQueueToggleButton = document.createElement('button');
         autoQueueToggleButton.id = 'auto-queue-toggle';
@@ -1381,20 +1119,20 @@ function checkForErrorAndRefresh() {
             font-weight: bold;
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         `;
-        
+
         autoQueueToggleButton.addEventListener('click', toggleAutoQueue);
-        
+
         // Load saved auto queue state
-        GM.getValue('isToggled', false).then(function(savedState) {
+        GM.getValue('isToggled', false).then(function (savedState) {
             isAutoQueueOn = savedState;
             autoQueueToggleButton.textContent = isAutoQueueOn ? 'Auto Queue On' : 'Auto Queue Off';
             autoQueueToggleButton.style.backgroundColor = isAutoQueueOn ? 'green' : 'red';
         });
-        
+
         document.body.appendChild(probButton);
         document.body.appendChild(autoQueueToggleButton);
     }
-    
+
     // Initialize toggle button when DOM is ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', createToggleButton);
@@ -1402,9 +1140,9 @@ function checkForErrorAndRefresh() {
         createToggleButton();
     }
 
-// Set up periodic checking for auto queue
-setInterval(checkButtonsPeriodically, 1000);
+    // Set up periodic checking for auto queue
+    setInterval(checkButtonsPeriodically, 1000);
 
-// Set interval to update the board regularly
-setInterval(updateBoard, 1000); // Check every second
+    // Set interval to update the board regularly
+    setInterval(updateBoard, 1000); // Check every second
 })();
