@@ -1010,13 +1010,8 @@
     // Function to check for error message and refresh if needed
     function checkForErrorAndRefresh() {
         const errorToast = document.querySelector('.toast-error .toast-message');
-        if (errorToast) {
-            const errorText = errorToast.textContent || "";
-            if (errorText.includes('The targeted frame is already played') ||
-                errorText.includes('Not enough shoots for this weapon')) {
-                console.log("Desync error detected, reloading page...");
-                location.reload();
-            }
+        if (errorToast && errorToast.textContent.includes('The targeted frame is already played')) {
+            location.reload();
         }
     }
     // Legacy functions removed - now using pure probability-based targeting
