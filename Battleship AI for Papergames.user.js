@@ -969,8 +969,8 @@
             var currentElement = chronometer || numberElement;
             console.log("Current Element:", currentElement);
 
-            // Check for error message first
-            checkForErrorAndRefresh();
+            // Check for error message first and see if we need to force a default weapon shot
+            let forceDefaultWeapon = checkForErrorAndRefresh();
 
             // Use pure probability-based targeting
             if (isGameReady(username)) {
@@ -991,8 +991,13 @@
                         }
                     }
 
-                    // Select optimal weapon before attacking
-                    const optimalWeapon = selectOptimalWeapon(row, col, board, probabilityScores);
+                    let optimalWeapon = 'default';
+                    // Select optimal weapon before attacking, UNLESS we just caught an out-of-ammo error
+                    if (forceDefaultWeapon) {
+                        console.log("Bypassing weapon selection: forcing default weapon due to ammo error");
+                    } else {
+                        optimalWeapon = selectOptimalWeapon(row, col, board, probabilityScores);
+                    }
                     console.log(`Using weapon: ${optimalWeapon}`);
 
                     // Select and use the optimal weapon
@@ -1100,8 +1105,10 @@
                 } else {
                     errorToast.parentElement.style.display = 'none';
                 }
+                return true;
             }
         }
+        return false;
     }
     // Legacy functions removed - now using pure probability-based targeting
 
