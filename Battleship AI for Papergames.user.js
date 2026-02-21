@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Battleship AI for Papergames
 // @namespace    github.io/longkidkoolstar
-// @version      4.1.9
+// @version      5.0.0
 // @description  Advanced AI for Battleship on papergames.io with strategic weapon selection, Bayesian inference, and probability visualization
 // @author       longkidkoolstar
 // @match        https://papergames.io/*
@@ -474,7 +474,7 @@
             }
 
             totalSunkCells = currentSunk;
-            confirmedHits = []; // Clear hits when ship is sunk
+            // Removed confirmedHits = []; to ensure remaining hits aren't ignored
         }
 
         totalHitsOnBoard = currentHits;
@@ -487,6 +487,52 @@
         };
     }
 
+    // Cluster confirmed hits into groups belonging to the same ship
+    // Returns an array of clusters, each being an array of {row, col}
+    function clusterHits(hits) {
+        if (hits.length === 0) return [];
+
+        const visited = new Set();
+        const clusters = [];
+
+        function getKey(r, c) { return `${r},${c}`; }
+        const hitSet = new Set(hits.map(h => getKey(h.row, h.col)));
+
+        for (const hit of hits) {
+            const key = getKey(hit.row, hit.col);
+            if (visited.has(key)) continue;
+
+            // BFS to find all connected hits (cardinal directions only)
+            const cluster = [];
+            const queue = [hit];
+            visited.add(key);
+
+            while (queue.length > 0) {
+                const current = queue.shift();
+                cluster.push(current);
+
+                const neighbors = [
+                    { row: current.row - 1, col: current.col },
+                    { row: current.row + 1, col: current.col },
+                    { row: current.row, col: current.col - 1 },
+                    { row: current.row, col: current.col + 1 }
+                ];
+
+                for (const n of neighbors) {
+                    const nKey = getKey(n.row, n.col);
+                    if (hitSet.has(nKey) && !visited.has(nKey)) {
+                        visited.add(nKey);
+                        queue.push(n);
+                    }
+                }
+            }
+
+            clusters.push(cluster);
+        }
+
+        return clusters;
+    }
+
     // Advanced PDF (Probability Density Function) calculation
     function calculateProbabilityScore(row, col, board) {
         let totalProbability = 0;
@@ -494,12 +540,25 @@
         // Target Mode is strictly when there are known, unsunk hits on the board.
         const isTargetMode = confirmedHits.length > 0;
 
+        // In target mode, focus on the largest hit cluster (most likely to be close to sinking)
+        let targetClusterHits = confirmedHits;
+        let knownOrientation = null;
+        if (isTargetMode) {
+            const clusters = clusterHits(confirmedHits);
+            if (clusters.length > 0) {
+                // Focus on the largest cluster first (closest to sinking a ship)
+                clusters.sort((a, b) => b.length - a.length);
+                targetClusterHits = clusters[0];
+                knownOrientation = determineOrientation(targetClusterHits);
+            }
+        }
+
         // Only calculate probabilities for remaining ships
         remainingShips.forEach(shipSize => {
             // Check horizontal placements covering (row, col)
             for (let startCol = Math.max(0, col - shipSize + 1); startCol <= Math.min(9, col); startCol++) {
                 if (startCol + shipSize <= 10) {
-                    const weight = evaluatePlacement(row, startCol, shipSize, 'horizontal', board, isTargetMode);
+                    const weight = evaluatePlacement(row, startCol, shipSize, 'horizontal', board, isTargetMode, targetClusterHits, knownOrientation);
                     totalProbability += weight;
                 }
             }
@@ -507,7 +566,7 @@
             // Check vertical placements covering (row, col)
             for (let startRow = Math.max(0, row - shipSize + 1); startRow <= Math.min(9, row); startRow++) {
                 if (startRow + shipSize <= 10) {
-                    const weight = evaluatePlacement(startRow, col, shipSize, 'vertical', board, isTargetMode);
+                    const weight = evaluatePlacement(startRow, col, shipSize, 'vertical', board, isTargetMode, targetClusterHits, knownOrientation);
                     totalProbability += weight;
                 }
             }
@@ -519,19 +578,18 @@
             return totalProbability;
         }
 
-        // Hunt Mode Optimization (Adaptive Parity)
-        // If a cell doesn't fit any ship, its probability is 0. If it does, enhance it conditionally.
+        // Hunt Mode Optimization
         if (totalProbability > 0) {
-            const smallestShip = remainingShips.length > 0 ? Math.min(...remainingShips) : 2;
-
-            // Check if cell matches the optimal parity for the smallest remaining ship
-            if ((row + col) % smallestShip === 0) {
-                totalProbability *= 2.0; // Huge bonus to strict parity cells
+            // Adaptive parity based on the smallest remaining ship ensures the AI covers the board optimally
+            const minShipSize = remainingShips.length > 0 ? Math.min(...remainingShips) : 2;
+            if ((row + col) % minShipSize === 0) {
+                totalProbability *= 1.8; // Strong bonus to parity cells
             }
 
-            // Add slight bonus for center of board
+            // Improved center weighting: quadratic falloff rewarding the middle area
             const distFromCenter = Math.abs(row - 4.5) + Math.abs(col - 4.5);
-            totalProbability += (10 - distFromCenter); // +1 to +10 bonus
+            const centerBonus = Math.max(0, 1.0 - (distFromCenter / 9.0)); // 0.0 to 1.0
+            totalProbability += centerBonus * centerBonus * 8; // Quadratic, max +8
 
             // Check if this cell has a question mark and add bonus score
             const cell = getCellByCoordinates(row, col);
@@ -544,10 +602,11 @@
     }
 
     // Evaluates a specific ship placement and returns its probability weight
-    function evaluatePlacement(startRow, startCol, shipSize, orientation, board, isTargetMode) {
+    function evaluatePlacement(startRow, startCol, shipSize, orientation, board, isTargetMode, clusterHits, knownOrientation) {
         let coversSunk = false;
         let coversMiss = false;
         let overlappedHits = 0;
+        let overlapsCluster = 0;
 
         for (let i = 0; i < shipSize; i++) {
             const r = orientation === 'vertical' ? startRow + i : startRow;
@@ -556,29 +615,32 @@
             const cellState = board[r][c];
             if (cellState === 'miss') coversMiss = true;
             if (cellState === 'destroyed') coversSunk = true;
-            if (cellState === 'hit') overlappedHits++;
+            if (cellState === 'hit') {
+                overlappedHits++;
+                // Check if this hit belongs to the focused cluster
+                if (clusterHits && clusterHits.some(h => h.row === r && h.col === c)) {
+                    overlapsCluster++;
+                }
+            }
         }
 
         // Invalid placements: overlaps misses or destroyed ships
         if (coversMiss || coversSunk) return 0;
 
-        // Strict Spacing Rules: check surrounding cells for destroyed ships
-        // Ships are not allowed to be adjacent (including diagonally) to confirmed sunken ships
+        // Spacing Rules: check CARDINAL-adjacent cells for destroyed ships
+        // Ships cannot be side-adjacent to confirmed sunken ships (diagonal is OK on papergames.io)
         for (let i = 0; i < shipSize; i++) {
             const r = orientation === 'vertical' ? startRow + i : startRow;
             const c = orientation === 'horizontal' ? startCol + i : startCol;
 
-            // Check all 8 adjacent cells for destroyed ships
+            // Check only 4 cardinal-adjacent cells for destroyed ships
             const adjacentPositions = [
-                [r - 1, c - 1], [r - 1, c], [r - 1, c + 1],
-                [r, c - 1], [r, c + 1],
-                [r + 1, c - 1], [r + 1, c], [r + 1, c + 1]
+                [r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]
             ];
 
             for (const [adjR, adjC] of adjacentPositions) {
                 if (adjR >= 0 && adjR < 10 && adjC >= 0 && adjC < 10) {
                     if (board[adjR][adjC] === 'destroyed') {
-                        // Exclude placement if it's adjacent to a destroyed ship
                         return 0;
                     }
                 }
@@ -587,15 +649,19 @@
 
         // Target Mode Logic
         if (isTargetMode) {
-            // In Target Mode, a placement MUST cover at least one confirmed hit to be considered.
-            if (overlappedHits === 0) return 0;
+            // In Target Mode, a placement MUST cover at least one hit from the focused cluster.
+            if (overlapsCluster === 0) return 0;
 
-            // Exponential scaling: Placements that overlap multiple hits are exponentially more likely.
-            return Math.pow(10, overlappedHits);
+            // If we know the orientation strictly, placements orthogonal to it must be invalid
+            if (knownOrientation && knownOrientation !== orientation) {
+                return 0; // Strictly enforce targeting on the correct axis
+            }
+
+            // Exponential scaling: Placements that overlap more cluster hits are exponentially better.
+            return Math.pow(10, overlapsCluster);
         }
 
         // Hunt Mode Logic
-        // In hunt mode, we expect 0 overlapped hits unless the board is inconsistent.
         return 1;
     }
 
@@ -909,7 +975,7 @@
             // Use pure probability-based targeting
             if (isGameReady(username)) {
                 updateShipTracking(board);
-                const bestCell = findBestProbabilityCell();
+                const bestCell = findBestProbabilityCell(board);
                 if (bestCell) {
                     console.log("Selected optimal cell based on probability calculations");
 
@@ -977,41 +1043,64 @@
     };
 
     // Function to find the cell with the highest probability score
-    function findBestProbabilityCell() {
-        const board = analyzeBoardState();
+    // Accepts pre-computed board to avoid redundant analysis
+    function findBestProbabilityCell(existingBoard) {
+        const board = existingBoard || analyzeBoardState();
         const opponentBoard = document.querySelector('.opponent app-battleship-board table');
         if (!opponentBoard) {
             console.log('Cannot find opponent board');
             return null;
         }
 
-        let bestCell = null;
         let bestScore = -1;
+        let candidates = []; // All cells tied for the best score
 
         opponentBoard.querySelectorAll('td[class*="cell-"]').forEach(cell => {
             // Only consider cells that haven't been attacked
-            if (cell.classList.contains('null') && cell.querySelector('svg.intersection:not(.no-hit)') || hasQuestionMark(cell)) {
+            if ((cell.classList.contains('null') && cell.querySelector('svg.intersection:not(.no-hit)')) || hasQuestionMark(cell)) {
                 const [row, col] = getCellCoordinates(cell);
                 const score = calculateProbabilityScore(row, col, board);
 
-                // console.log(`Cell [${row},${col}] probability score: ${score}`);
-
                 if (score > bestScore) {
                     bestScore = score;
-                    bestCell = cell;
+                    candidates = [cell]; // New best — reset candidates
+                } else if (score === bestScore && score > 0) {
+                    candidates.push(cell); // Tie — add to candidates
                 }
             }
         });
 
-        console.log(`Best cell found with score: ${bestScore}`);
-        return bestCell;
+        if (candidates.length === 0) {
+            console.log('No valid cells found');
+            return null;
+        }
+
+        // Random tie-breaking: pick randomly among all cells with the same best score
+        const selected = candidates[Math.floor(Math.random() * candidates.length)];
+        const [sr, sc] = getCellCoordinates(selected);
+        console.log(`Best score: ${bestScore.toFixed(1)} | Tie-break: selected [${sr},${sc}] randomly from ${candidates.length} candidates`);
+        return selected;
     }
 
     // Function to check for error message and refresh if needed
     function checkForErrorAndRefresh() {
         const errorToast = document.querySelector('.toast-error .toast-message');
-        if (errorToast && errorToast.textContent.includes('The targeted frame is already played')) {
-            location.reload();
+        if (errorToast) {
+            const errorText = errorToast.textContent || "";
+            if (errorText.includes('The targeted frame is already played')) {
+                location.reload();
+            } else if (errorText.includes('Not enough shoots for this weapon')) {
+                console.log("Weapon ammo empty, falling back to default weapon...");
+                selectAndUseWeapon('default');
+
+                // Hide or click the toast to dismiss it so it doesn't block future checks
+                const closeButton = errorToast.parentElement.querySelector('.toast-close-button');
+                if (closeButton) {
+                    closeButton.click();
+                } else {
+                    errorToast.parentElement.style.display = 'none';
+                }
+            }
         }
     }
     // Legacy functions removed - now using pure probability-based targeting
